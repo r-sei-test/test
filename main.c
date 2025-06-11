@@ -94,4 +94,51 @@ int login()
 }
 
 // Integer overflow vuln + unsafe heap buffer write
-voi
+void collect_user_input()
+{
+    size_t count, size;
+    printf("How many blocks to allocate? ");
+    scanf("%zu", &count);
+    printf("Size of each block? ");
+    scanf("%zu", &size);
+    getchar(); // flush newline
+
+    // ⚠️ integer overflow
+    size_t total = count * size;
+    char *heap_buf = malloc(total);
+    if (!heap_buf)
+    {
+        puts("Allocation failed.");
+        return;
+    }
+
+    printf("Enter your input: ");
+    char temp[1024];
+    fgets(temp, sizeof(temp), stdin);
+
+    // ⚠️ unchecked copy: heap_buf may be smaller than strlen(temp)
+    strcpy(heap_buf, temp); // ⚠️ heap-based overflow
+
+    printf("Received: %s\n", heap_buf);
+    free(heap_buf);
+}
+
+int main()
+{
+    puts("=== Welcome to InsecureLogin v1.4 ===");
+
+    load_users(); // ⚠️ format string
+
+    collect_user_input(); // ⚠️ integer overflow + heap overflow
+
+    if (login())
+    {
+        puts("Access granted.");
+    }
+    else
+    {
+        puts("Access denied.");
+    }
+
+    return 0;
+}
