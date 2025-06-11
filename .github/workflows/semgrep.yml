@@ -8,6 +8,7 @@ on:
 
 jobs:
   semgrep_scan:
+    name: semgrep/ci
     runs-on: ubuntu-latest
     if: (github.actor != 'dependabot[bot]')
     permissions:
@@ -16,21 +17,48 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: returntocorp/semgrep-action@v1
+      - name: Run Semgrep scan
+        uses: returntocorp/semgrep-action@v1
         with:
           config: auto
           generate-sarif: true
 
-      - name: Save SARIF results as artifact
+      - name: List files for debugging
+        run: find . -type f
+
+      - name: Upload SARIF results as artifact (if exists)
+        if: success() || failure()
+        run: |
+          if [ -f semgrep.sarif ]; then
+            echo "Uploading semgrep.sarif as artifact"
+            mkdir -p artifact && cp semgrep.sarif artifact/
+          else
+            echo "semgrep.sarif not found, skipping artifact upload"
+          fi
+
+      - name: Upload artifact
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-scan-results
-          path: semgrep.sarif
+          path: artifact/semgrep.sarif
+          if-no-files-found: ignore
 
-      - name: Upload SARIF to GitHub Security Dashboard
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-        if: always()
+      - name: Upload SARIF to GitHub Security Dashboard (if exists)
+        if: success() || failure()
+        run: |
+          if [ -f semgrep.sarif ]; then
+            gh api \
+              --method POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              /repos/${{ github.repository }}/code-scanning/sarifs \
+              -f commit_sha=${{ github.sha }} \
+              -f ref=${{ github.ref }} \
+              -f sarif=@semgrep.sarif
+          else
+            echo "semgrep.sarif not found; skipping SARIF upload"
+          fi
