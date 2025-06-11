@@ -1,49 +1,55 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# This workflow file requires a free account on Semgrep.dev to
-# manage rules, file ignores, notifications, and more.
-#
-# See https://semgrep.dev/docs
-
+# Name of this GitHub Actions workflow.
 name: Semgrep
 
 on:
+  # Scan changed files in PRs (diff-aware scanning):
+  pull_request: {}
+  # Scan on-demand through GitHub Actions interface:
+  workflow_dispatch: {}
+  # Scan mainline branches and report all findings:
   push:
-    branches: [ "main" ]
-  pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ "main" ]
-  schedule:
-    - cron: '41 16 * * 6'
-
-permissions:
-  contents: read
+    branches: ["master", "main"]
 
 jobs:
-  semgrep:
-    permissions:
-      contents: read # for actions/checkout to fetch code
-      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
-      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
-    name: Scan
+  semgrep_scan:
+    # User definable name of this GitHub Actions job.
+    name: semgrep/ci
+    # If you are self-hosting, change the following `runs-on` value:
     runs-on: ubuntu-latest
-    steps:
-      # Checkout project source
-      - uses: actions/checkout@v4
+    container:
+      # A Docker image with Semgrep installed. Do not change this.
+      image: returntocorp/semgrep
+    # Skip any PR created by dependabot to avoid permission issues:
+    if: (github.actor != 'dependabot[bot]')
+    permissions:
+      # required for all workflows
+      security-events: write
+      # only required for workflows in private repositories
+      actions: read
+      contents: read
 
-      # Scan code using project's configuration on https://semgrep.dev/manage
-      - uses: returntocorp/semgrep-action@fcd5ab7459e8d91cb1777481980d1b18b4fc6735
+    steps:
+      # Fetch project source with GitHub Actions Checkout.
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Perform Semgrep Analysis
+      # @NOTE: This is the actual semgrep command to scan your code.
+      # Modify the --config option to 'r/all' to scan using all rules,
+      # or use multiple flags to specify particular rules, such as
+      # --config r/all --config custom/rules
+        run: semgrep scan -q --sarif --config auto ./vulnerable-source-code > semgrep-results.sarif
+
+      # upload the results for the CodeQL GitHub app to annotate the code
+      - name: Save SARIF results as artifact
+        uses: actions/upload-artifact@v3
         with:
-          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-          publishDeployment: ${{ secrets.SEMGREP_DEPLOYMENT_ID }}
-          generateSarif: "1"
+          name: semgrep-scan-results
+          path: semgrep-results.sarif
 
       # Upload SARIF file generated in previous step
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload SARIF result to the GitHub Security Dashboard
+        uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: semgrep.sarif
+          sarif_file: semgrep-results.sarif
         if: always()
