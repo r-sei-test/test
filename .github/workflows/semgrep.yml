@@ -10,7 +10,7 @@ jobs:
   semgrep_scan:
     name: semgrep/ci
     runs-on: ubuntu-latest
-    if: (github.actor != 'dependabot[bot]')
+    if: github.actor != 'dependabot[bot]'
     permissions:
       security-events: write
       actions: read
@@ -20,44 +20,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Semgrep scan
-        uses: returntocorp/semgrep-action@v1
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          config: auto
-          args: --sarif --output=semgrep.sarif
+          python-version: '3.x'
 
-      - name: List files for debugging
-        run: find . -type f
+      - name: Install Semgrep
+        run: pip install semgrep
 
-      - name: Upload SARIF results as artifact (if exists)
-        if: success() || failure()
-        run: |
-          if [ -f semgrep.sarif ]; then
-            mkdir -p artifact && cp semgrep.sarif artifact/
-          else
-            echo "semgrep.sarif not found, skipping artifact upload"
-          fi
+      - name: Run Semgrep scan
+        run: semgrep scan -q --config auto --sarif --output=semgrep.sarif .
 
-      - name: Upload artifact
-        if: success() || failure()
+      - name: Debug: List files
+        run: ls -lah
+
+      - name: Save SARIF results
         uses: actions/upload-artifact@v4
         with:
-          name: semgrep-scan-results
-          path: artifact/semgrep.sarif
+          name: semgrep-sarif
+          path: semgrep.sarif
           if-no-files-found: ignore
 
-      - name: Upload SARIF to GitHub Security Dashboard (if exists)
-        if: success() || failure()
-        run: |
-          if [ -f semgrep.sarif ]; then
-            gh api \
-              --method POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              /repos/${{ github.repository }}/code-scanning/sarifs \
-              -f commit_sha=${{ github.sha }} \
-              -f ref=${{ github.ref }} \
-              -f sarif=@semgrep.sarif
-          else
-            echo "semgrep.sarif not found; skipping SARIF upload"
-          fi
+      - name: Upload SARIF to Security Dashboard
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+        if: always()
