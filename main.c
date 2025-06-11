@@ -7,47 +7,68 @@
 #define MAX_USERNAME 32
 #define MAX_PASSWORD 32
 
-void load_users() {
+// Function to simulate loading users (still vulnerable to format string attack)
+void load_users()
+{
     FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (file == NULL) {
+    if (file == NULL)
+    {
         printf("Error opening file.\n");
         return;
     }
 
     char line[128];
-
     printf("=== Users in System ===\n");
-    while (fgets(line, sizeof(line), file)) {
+
+    while (fgets(line, sizeof(line), file))
+    {
         printf(line); // ⚠️ Format string vulnerability
     }
 
     fclose(file);
 }
 
-void log_failed_attempt(char *username) {
+// Function with command injection vulnerability
+void log_failed_attempt(char *username)
+{
     char cmd[256];
 
-    // ⚠️ Command Injection Vulnerability
-    // Attacker-controlled input passed directly to system()
+    // ⚠️ Command Injection
     snprintf(cmd, sizeof(cmd), "echo 'Failed login for user: %s' >> failed.log", username);
-
-    // If username is: `bob'; rm -rf / #`
-    // The command becomes: echo 'Failed login for user: bob'; rm -rf / #' >> failed.log
     system(cmd);
 }
 
-int login() {
-    char username[32];
-    char password[32];
+// ✅ Secure input reading function replacing gets()
+void read_input(char *buffer, size_t size)
+{
+    fgets(buffer, size, stdin);
+    buffer[strcspn(buffer, "\n")] = '\0'; // Remove newline
+}
+
+// ⚠️ Function with newly added integer overflow
+char *allocate_buffer(size_t count, size_t size)
+{
+    // ⚠️ Integer Overflow Vulnerability
+    size_t total = count * size;
+
+    // If count and size are large enough, this overflows and malloc gets small size
+    return (char *)malloc(total);
+}
+
+int login()
+{
+    char username[MAX_USERNAME];
+    char password[MAX_PASSWORD];
 
     printf("Username: ");
-    gets(username); // ⚠️ Buffer overflow
+    read_input(username, sizeof(username)); // ✅ Secure input
 
     printf("Password: ");
-    gets(password); // ⚠️ Buffer overflow
+    read_input(password, sizeof(password)); // ✅ Secure input
 
     FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (file == NULL) {
+    if (file == NULL)
+    {
         printf("Could not open credentials file.\n");
         return 0;
     }
@@ -56,8 +77,10 @@ int login() {
     char file_pass[64];
     int authenticated = 0;
 
-    while (fscanf(file, "%63s %63s", file_user, file_pass) == 2) {
-        if (strcmp(username, file_user) == 0 && strcmp(password, file_pass) == 0) {
+    while (fscanf(file, "%63s %63s", file_user, file_pass) == 2)
+    {
+        if (strcmp(username, file_user) == 0 && strcmp(password, file_pass) == 0)
+        {
             authenticated = 1;
             break;
         }
@@ -65,24 +88,51 @@ int login() {
 
     fclose(file);
 
-    if (!authenticated) {
-        log_failed_attempt(username); // ⚠️ Unsanitized input → command injection
+    if (!authenticated)
+    {
+        log_failed_attempt(username); // ⚠️ Command injection
     }
 
     return authenticated;
 }
 
-int main() {
-    printf("=== Welcome to InsecureLogin v1.2 ===\n");
+int main()
+{
+    printf("=== Welcome to InsecureLogin v1.3 ===\n");
 
-    load_users(); // Format string vulnerability
+    load_users(); // ⚠️ Format string
 
-    if (login()) {
+    // ⚠️ Trigger point: allocate user input buffer using vulnerable function
+    size_t input_count, input_size;
+    printf("How many input blocks do you want to allocate? ");
+    scanf("%zu", &input_count);
+
+    printf("Size of each block? ");
+    scanf("%zu", &input_size);
+    getchar(); // Flush leftover newline
+
+    // ⚠️ Integer Overflow Vulnerability: large values overflow and lead to malloc(too-small)
+    char *user_input = allocate_buffer(input_count, input_size);
+
+    if (user_input == NULL)
+    {
+        printf("Allocation failed.\n");
+        return 1;
+    }
+
+    printf("Allocated buffer. Please type your input: ");
+    read_input(user_input, input_count * input_size); // May cause heap overflow if under-allocated
+
+    free(user_input);
+
+    if (login())
+    {
         printf("Access granted.\n");
-    } else {
+    }
+    else
+    {
         printf("Access denied.\n");
     }
 
     return 0;
 }
-
