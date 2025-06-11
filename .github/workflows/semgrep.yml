@@ -24,7 +24,7 @@ jobs:
         uses: returntocorp/semgrep-action@v1
         with:
           config: auto
-          generate-sarif: true
+          args: --sarif --output=semgrep.sarif
 
       - name: List files for debugging
         run: find . -type f
@@ -33,7 +33,6 @@ jobs:
         if: success() || failure()
         run: |
           if [ -f semgrep.sarif ]; then
-            echo "Uploading semgrep.sarif as artifact"
             mkdir -p artifact && cp semgrep.sarif artifact/
           else
             echo "semgrep.sarif not found, skipping artifact upload"
