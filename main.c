@@ -3,78 +3,74 @@
 #include <string.h>
 
 #define CREDENTIALS_FILE "users.txt"
-
 #define MAX_USERNAME 32
 #define MAX_PASSWORD 32
 
-// Function to simulate loading users (still vulnerable to format string attack)
+// Load user accounts, vulnerable to format string injection
 void load_users()
 {
     FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (file == NULL)
+    if (!file)
     {
-        printf("Error opening file.\n");
+        puts("Error opening file.");
         return;
     }
 
     char line[128];
-    printf("=== Users in System ===\n");
-
+    puts("=== Users in System ===");
     while (fgets(line, sizeof(line), file))
     {
-        printf(line); // ⚠️ Format string vulnerability
+        printf(line); // ⚠️ format string vuln if users.txt is attacker-controlled
     }
 
     fclose(file);
 }
 
-// Function with command injection vulnerability
-void log_failed_attempt(char *username)
+// Logs failed attempts using system() with unescaped input
+void log_failed_attempt(const char *username)
 {
     char cmd[256];
 
-    // ⚠️ Command Injection
+    // ⚠️ command injection: username can inject shell commands
     snprintf(cmd, sizeof(cmd), "echo 'Failed login for user: %s' >> failed.log", username);
     system(cmd);
 }
 
-// ✅ Secure input reading function replacing gets()
+// New buffer overflow: improperly sized stack buffer and strcpy
+void unsafe_copy_to_stack(const char *src)
+{
+    char small_buf[16];     // ⚠️ small buffer
+    strcpy(small_buf, src); // ⚠️ overflow if src > 15 bytes
+    printf("Debug echo: %s\n", small_buf);
+}
+
+// Secure(ish) input function (fgets with newline strip)
 void read_input(char *buffer, size_t size)
 {
     fgets(buffer, size, stdin);
-    buffer[strcspn(buffer, "\n")] = '\0'; // Remove newline
+    buffer[strcspn(buffer, "\n")] = '\0';
 }
 
-// ⚠️ Function with newly added integer overflow
-char *allocate_buffer(size_t count, size_t size)
-{
-    // ⚠️ Integer Overflow Vulnerability
-    size_t total = count * size;
-
-    // If count and size are large enough, this overflows and malloc gets small size
-    return (char *)malloc(total);
-}
-
+// Authenticates user with timing vulnerability + logs failed attempts
 int login()
 {
     char username[MAX_USERNAME];
     char password[MAX_PASSWORD];
 
     printf("Username: ");
-    read_input(username, sizeof(username)); // ✅ Secure input
+    read_input(username, sizeof(username)); // ✅ bounded input
 
     printf("Password: ");
-    read_input(password, sizeof(password)); // ✅ Secure input
+    read_input(password, sizeof(password)); // ✅ bounded input
 
     FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (file == NULL)
+    if (!file)
     {
-        printf("Could not open credentials file.\n");
+        puts("Could not open credentials file.");
         return 0;
     }
 
-    char file_user[64];
-    char file_pass[64];
+    char file_user[64], file_pass[64];
     int authenticated = 0;
 
     while (fscanf(file, "%63s %63s", file_user, file_pass) == 2)
@@ -90,49 +86,12 @@ int login()
 
     if (!authenticated)
     {
-        log_failed_attempt(username); // ⚠️ Command injection
+        log_failed_attempt(username);   // ⚠️ command injection
+        unsafe_copy_to_stack(username); // ⚠️ buffer overflow on username
     }
 
     return authenticated;
 }
 
-int main()
-{
-    printf("=== Welcome to InsecureLogin v1.3 ===\n");
-
-    load_users(); // ⚠️ Format string
-
-    // ⚠️ Trigger point: allocate user input buffer using vulnerable function
-    size_t input_count, input_size;
-    printf("How many input blocks do you want to allocate? ");
-    scanf("%zu", &input_count);
-
-    printf("Size of each block? ");
-    scanf("%zu", &input_size);
-    getchar(); // Flush leftover newline
-
-    // ⚠️ Integer Overflow Vulnerability: large values overflow and lead to malloc(too-small)
-    char *user_input = allocate_buffer(input_count, input_size);
-
-    if (user_input == NULL)
-    {
-        printf("Allocation failed.\n");
-        return 1;
-    }
-
-    printf("Allocated buffer. Please type your input: ");
-    read_input(user_input, input_count * input_size); // May cause heap overflow if under-allocated
-
-    free(user_input);
-
-    if (login())
-    {
-        printf("Access granted.\n");
-    }
-    else
-    {
-        printf("Access denied.\n");
-    }
-
-    return 0;
-}
+// Integer overflow vuln + unsafe heap buffer write
+voi
