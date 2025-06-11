@@ -2,18 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Hardcoded file
 #define CREDENTIALS_FILE "users.txt"
 
-// Max size for username and password
 #define MAX_USERNAME 32
 #define MAX_PASSWORD 32
 
-// Function to simulate user enumeration and demonstrate format string vulnerability
 void load_users() {
     FILE *file = fopen(CREDENTIALS_FILE, "r");
-
-    // Insecure file access (no permission or ownership check)
     if (file == NULL) {
         printf("Error opening file.\n");
         return;
@@ -22,27 +17,34 @@ void load_users() {
     char line[128];
 
     printf("=== Users in System ===\n");
-
-    // Read each line of file
     while (fgets(line, sizeof(line), file)) {
-        // ⚠️ Format String Vulnerability:
-        // If attacker can control content of 'users.txt', this becomes exploitable
-        printf(line); // attacker-controlled format string
+        printf(line); // ⚠️ Format string vulnerability
     }
 
     fclose(file);
 }
 
-// Function with buffer overflow via gets()
+void log_failed_attempt(char *username) {
+    char cmd[256];
+
+    // ⚠️ Command Injection Vulnerability
+    // Attacker-controlled input passed directly to system()
+    snprintf(cmd, sizeof(cmd), "echo 'Failed login for user: %s' >> failed.log", username);
+
+    // If username is: `bob'; rm -rf / #`
+    // The command becomes: echo 'Failed login for user: bob'; rm -rf / #' >> failed.log
+    system(cmd);
+}
+
 int login() {
     char username[32];
     char password[32];
 
     printf("Username: ");
-    gets(username); // ⚠️ Classic buffer overflow (unsafe)
+    gets(username); // ⚠️ Buffer overflow
 
     printf("Password: ");
-    gets(password); // ⚠️ Another buffer overflow
+    gets(password); // ⚠️ Buffer overflow
 
     FILE *file = fopen(CREDENTIALS_FILE, "r");
     if (file == NULL) {
@@ -52,12 +54,9 @@ int login() {
 
     char file_user[64];
     char file_pass[64];
-
     int authenticated = 0;
 
-    // Read stored credentials from file
     while (fscanf(file, "%63s %63s", file_user, file_pass) == 2) {
-        // ⚠️ Timing attack surface: strcmp() returns on first mismatch
         if (strcmp(username, file_user) == 0 && strcmp(password, file_pass) == 0) {
             authenticated = 1;
             break;
@@ -65,13 +64,18 @@ int login() {
     }
 
     fclose(file);
+
+    if (!authenticated) {
+        log_failed_attempt(username); // ⚠️ Unsanitized input → command injection
+    }
+
     return authenticated;
 }
 
 int main() {
-    printf("=== Welcome to InsecureLogin v1.1 ===\n");
+    printf("=== Welcome to InsecureLogin v1.2 ===\n");
 
-    load_users(); // ⚠️ Prints attacker-controlled file contents
+    load_users(); // Format string vulnerability
 
     if (login()) {
         printf("Access granted.\n");
