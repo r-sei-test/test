@@ -37,7 +37,7 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@61b9e3751b92087fd0b06925ba6dd6314e06f089 # master
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # master
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/python@e2221410bff24446ba09102212d8bc75a567237d # master
         continue-on-error: true # To make sure that SARIF upload gets called
