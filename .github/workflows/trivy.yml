@@ -175,21 +175,21 @@ jobs:
       # This keeps tools separated in the Security UI and aligns with the “one run per upload” rule.
       - name: Upload vuln SARIF
         if: hashFiles('reports/trivy-vuln.sarif') != ''
-        uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        uses: github/codeql-action/upload-sarif@d3678e237b9c32a6c9bffb3315c335f976f3549f # v3.30.2
         with:
           sarif_file: reports/trivy-vuln.sarif
           category: trivy-vuln
 
       - name: Upload config SARIF
         if: hashFiles('reports/trivy-config.sarif') != ''
-        uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        uses: github/codeql-action/upload-sarif@d3678e237b9c32a6c9bffb3315c335f976f3549f # v3.30.2
         with:
           sarif_file: reports/trivy-config.sarif
           category: trivy-config
 
       - name: Upload secret SARIF
         if: hashFiles('reports/trivy-secret.sarif') != ''
-        uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        uses: github/codeql-action/upload-sarif@d3678e237b9c32a6c9bffb3315c335f976f3549f # v3.30.2
         with:
           sarif_file: reports/trivy-secret.sarif
           category: trivy-secret
