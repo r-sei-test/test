@@ -1,4 +1,4 @@
-# SonarCloud analysis for a tiny C repo (single main.c)
+# SonarCloud analysis 
 # -----------------------------------------------------------------------------
 # What this does:
 #   1) Builds the code under Sonar's Build Wrapper (produces compile_commands.json)
@@ -8,36 +8,36 @@
 #   4) Publishes the SARIF to GitHub Code Scanning in a separate, least-privilege job
 #
 # Why it looks this way (key principles):
-#   • Default‑deny permissions – read‑only by default; elevate only in the upload job
-#   • Pinned actions – commit SHAs, not floating tags, for reproducibility and tamper‑resistance
-#   • Hardened egress – audit (or block) network calls to limit exfiltration risk
-#   • Concurrency – cancel superseded runs to save time and money
-#   • Timeouts – fail fast instead of hanging for hours
-#   • Scoped checkout credentials – don't persist the GitHub token into the repo
-#   • Clear triggers – run only when relevant files change
+#   - Default‑deny permissions: read‑only by default; elevate only in the upload job
+#   - Pinned actions: commit SHAs, not floating tags, for reproducibility and tamper‑resistance
+#   - Hardened egress: audit (or block) network calls to limit exfiltration risk
+#   - Concurrency: cancel superseded runs to save resources
+#   - Timeouts: fail fast instead of hanging 
+#   - Scoped checkout credentials: don't persist the GitHub token into the repo
+#   - Clear triggers: run only when relevant files change
 #
 # Prereqs in the repo:
-#   • sonar-project.properties with:
+#   - sonar-project.properties with:
 #       sonar.projectKey=<your_sonarcloud_project_key>
 #       sonar.organization=<your_sonarcloud_org_key>
 #       sonar.sources=.
-#   • A file named main.c at repo root (adjust paths/commands if different)
+#   - A file named main.c at repo root (adjust paths/build commands if different)
 #
 # Secret needed:
-#   • SONAR_TOKEN (Actions → Secrets) – a SonarCloud user token with access to the project
+#   - SONAR_TOKEN (Actions -> Secrets) – a SonarCloud user token with access to the project
 
-name: SonarCloud (C)
+name: SonarCloud
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     # Trigger only when C sources, the workflow, or Sonar properties change
     # paths:
     #  - '**/*.c'
     #  - 'sonar-project.properties'
     #  - '.github/workflows/sonarcloud.yml'
   pull_request:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     types: [opened, synchronize, reopened]
     # paths:
     #  - '**/*.c'
@@ -45,7 +45,7 @@ on:
     #  - '.github/workflows/sonarcloud.yml'
   # workflow_dispatch:
 
-# Cancel older in‑flight runs of the same ref. Avoids CI pile‑ups on active PRs.
+# Cancel older in-flight runs of the same ref. Avoids CI pile-ups on active PRs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
   cancel-in-progress: true
@@ -59,7 +59,7 @@ jobs:
   build-and-scan:
     name: Build and analyze
     runs-on: ubuntu-24.04            # Explicit runner version for reproducibility
-    timeout-minutes: 15              # Cap wall‑clock time for the job
+    timeout-minutes: 15              # Cap time for the job
     permissions:
       contents: read                 # Read‑only; no secret write scopes here
     env:
@@ -83,7 +83,7 @@ jobs:
           #   objects.githubusercontent.com
 
       # Do not persist the GITHUB_TOKEN into the repo (reduces risk in later steps)
-      - name: Checkout (no persisted creds)
+      - name: Checkout 
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
           fetch-depth: 0              # Full history improves blame/issue precision
@@ -122,8 +122,8 @@ jobs:
           args: >
             --define sonar.cfamily.compile-commands=${{ env.BW_OUT }}/compile_commands.json
 
-      # Convert SonarCloud issues → SARIF so GitHub Code Scanning can ingest them.
-      # Why a custom step? SonarCloud doesn’t publish SARIF directly, so we fetch issues via API and transcode.
+      # Convert SonarCloud issues -> SARIF so GitHub Code Scanning can ingest them.
+      # SonarCloud doesn’t publish SARIF directly, so we fetch issues via API and transcode.
       - name: Generate SARIF from SonarCloud issues
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -155,7 +155,7 @@ jobs:
           print(f"Project: {project_key}")
 
           # Wait until the most recent Compute Engine (CE) task has finished
-          for _ in range(120):  # ~6 minutes max
+          for _ in range(360): 
               act = get_json(f"{base}/api/ce/activity?component={urllib.parse.quote(project_key)}&onlyCurrents=true&ps=1", token)
               tasks = act.get("tasks", [])
               if tasks:
@@ -231,7 +231,7 @@ jobs:
               json.dump(sarif, f, ensure_ascii=False)
           print(f"Wrote {len(issues)} issues to reports/sonarcloud.sarif")
           PY
-        timeout-minutes: 3
+        timeout-minutes: 20
 
       # Keep an auditable copy of the SARIF. Do not upload secrets.
       - name: Upload SARIF as artifact
@@ -239,7 +239,7 @@ jobs:
         with:
           name: sonarcloud-sarif
           path: reports/sonarcloud.sarif
-          retention-days: 7
+          retention-days: 14
           if-no-files-found: error
 
   # Job 2: upload SARIF to GitHub Code Scanning with the only write scope it needs
@@ -247,7 +247,7 @@ jobs:
     name: Publish SARIF to Code Scanning
     needs: build-and-scan               # Run only after SARIF is produced
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write            # Narrow write scope to this tiny, isolated job
