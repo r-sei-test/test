@@ -1,28 +1,25 @@
-# OpenSSF Scorecard supply-chain security — hardened, pinned, freshman-friendly
+# OpenSSF Scorecard supply-chain security — hardened and pinned
 # =============================================================================
 # What this workflow does (high level):
 #   1) Job "analysis": runs OpenSSF Scorecard against your repo and writes SARIF.
-#      IMPORTANT: This job contains ONLY `uses:` steps (no `run:`) to satisfy
-#      Scorecard’s workflow verification. If you add a `run:` step here, publishing
+#      This job contains only uses steps to satisfy Scorecard’s
+#      workflow verification. If you add a run step here, publishing
 #      to the OpenSSF webapp will fail with HTTP 400.
 #   2) Job "upload-to-code-scanning": downloads the SARIF and uploads it to
 #      GitHub Code Scanning (Security tab). This keeps 'security-events: write'
-#      scoped to a tiny job surface (least privilege).
+#      scoped to a tiny job surface.
 #
 # Why it’s structured this way (best practices):
-#   • Default-deny permissions at the workflow level (read-only); jobs elevate only what they need.
-#   • Pin third-party actions to full commit SHAs (reproducible, tamper-resistant).
-#   • Concurrency cancels superseded runs to avoid CI pile-ups.
-#   • Timeouts cap spend and fail fast.
-#   • Harden the runner’s outbound network (egress): start in 'audit'; switch to 'block' + allowlist later.
-#   • Scoped checkout credentials (we don’t push from this workflow).
-#   • Explicit runner image (ubuntu-24.04).
-#   • Conditional publishing: Scorecard’s `publish_results` only on default branch (and public repos).
+#   - Default-deny permissions at the workflow level (read-only); jobs elevate only what they need.
+#   - Pin third-party actions to full commit SHAs (reproducible, tamper-resistant).
+#   - Concurrency cancels superseded runs to avoid CI pile-ups.
+#   - Timeouts cap spend and fail fast.
+#   - Harden the runner’s outbound network (egress).
+#   - Scoped checkout credentials.
+#   - Explicit runner VM image (ubuntu-24.04).
 #
-# Helpful maintenance tips:
-#   • Keep the Scorecard job “uses-only”. Add any custom scripting to a separate job if needed.
-#   • If you change your default branch name, update the push trigger and the `publish_results` condition.
-#   • After a few green runs, flip egress to 'block' and add a tight GitHub-only allowlist.
+# Maintenance tips:
+#   - Keep the Scorecard job “uses-only”. Add any custom scripting to a separate job if needed.
 
 name: Scorecard supply-chain security
 
@@ -36,13 +33,13 @@ on:
 
   # Run on pushes to the default branch (publishing supported only from default)
   push:
-    branches: [ "main" ]  # ← change if your default branch is not "main"
+    branches: [ "**" ] # [ "main" ] 
 
   # Run on PRs so contributors see findings before merge
   pull_request:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     paths:
-      # TIP: Narrow these as you like; leaving **/* ensures checks run when any file changes
+      # Narrow these as you like; leaving **/* ensures checks run when any file changes
       - "**/*"
       - ".github/workflows/scorecard.yml"
 
@@ -63,13 +60,13 @@ jobs:
     timeout-minutes: 15                   # Fail fast instead of hanging indefinitely
 
     # Least privilege here:
-    # - contents: read → checkout
-    # - id-token: write → required if `publish_results: true` on default branch (public repos)
+    # - contents: read -> checkout
+    # - id-token: write -> required if `publish_results: true` on default branch (public repos)
     permissions:
       contents: read
       id-token: write
 
-    # IMPORTANT: this job must contain ONLY `uses:` steps (no `run:`) to pass Scorecard’s workflow verification
+    # This job must contain only `uses:` steps (no `run:`) to pass Scorecard’s workflow verification
     steps:
       # Harden network egress to reduce data exfiltration risk if a step is compromised.
       # Start in audit mode (learn endpoints). Later, switch to:
@@ -84,15 +81,15 @@ jobs:
         with:
           egress-policy: audit
 
-      # Checkout with no persisted credentials (we don’t push in this workflow)
-      - name: Checkout code (no persisted creds)
+      # Checkout with no persisted credentials 
+      - name: Checkout code 
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-          fetch-depth: 0                  # Some checks benefit from history (e.g., Maintained)
+          fetch-depth: 0                  # Some checks benefit from history 
 
       # Run Scorecard and write SARIF. Publishing to OpenSSF works only on the default
-      # branch and for public repos; this condition enforces that.
+      # branch and for public repos.
       - name: Run Scorecard
         uses: ossf/scorecard-action@05b42c624433fc40578a4040d5cf5e36ddca8cde # v2.4.2
         with:
@@ -111,7 +108,7 @@ jobs:
         with:
           name: scorecard-sarif
           path: results.sarif
-          retention-days: 14              # Keep for two weeks; tune to your policy
+          retention-days: 14              # tune to your policy
 
   # ─────────────────────────── Job 2: Upload to GitHub Code Scanning ───────────────────────────
   upload-to-code-scanning:
