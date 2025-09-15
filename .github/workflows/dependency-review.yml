@@ -1,26 +1,26 @@
-# Dependency Review (PRs and Pushes) — hardened & freshman-friendly
+# Dependency Review (PRs and Pushes) — hardened
 # =============================================================================
 # What this workflow does:
-#   • On PRs that change dependency manifests: runs GitHub’s Dependency Review,
-#     annotates the PR, and (optionally) comments a summary.
-#   • On pushes to main (or your chosen branches): compares the new commit to
+#   - On PRs that change dependency manifests: runs GitHub’s Dependency Review,
+#     annotates the PR, and (optionally) provide a summary.
+#   - On pushes to main (or chosen branches): compares the new commit to
 #     the previous one to catch vulnerable upgrades outside PRs.
 #
 # Key practices:
-#   • Default-deny permissions at workflow level; jobs elevate only what they need.
-#   • Pin third-party actions to commit SHAs (reproducible, tamper-resistant).
-#   • Guard untrusted PRs (use pull_request, not pull_request_target).
-#   • Concurrency cancels superseded runs to avoid CI pile-ups.
-#   • Timeouts cap spend and fail fast.
-#   • Harden egress (audit → later block + allowlist).
-#   • Scoped checkout creds (no pushes from this workflow).
-#   • Trigger only when dependency files or this workflow change.
+#   - Default-deny permissions at workflow level; jobs elevate only what they need.
+#   - Pin third-party actions to commit SHAs (reproducible, tamper-resistant).
+#   - Guard untrusted PRs (use pull_request, not pull_request_target).
+#   - Concurrency cancels superseded runs to avoid CI pile-ups.
+#   - Timeouts cap spend and fail fast.
+#   - Harden egress with StepSecurity.
+#   - Scoped checkout credentials.
+#   - Trigger only when dependency files or this workflow change.
 
 name: Dependency review
 
 on:
   pull_request:
-    branches: [ "main" ]                 # tune for your branching model
+    branches: [ "**" ] # [ "main" ]                  
     # Run only if dependency manifests change (adjust for your ecosystems)
     paths:
       - "**/package.json"
@@ -48,7 +48,7 @@ on:
 
   # Also run on pushes (e.g., to main) so direct commits are covered
   push:
-    branches: [ "main" ]                 # add release/* or others if you want
+    branches: [ "**" ] # [ "main" ]
     paths:
       - "**/package.json"
       - "**/package-lock.json"
@@ -92,8 +92,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Least privilege for PRs:
-    # - contents: read → checkout
-    # - pull-requests: write → to post a summary comment (optional)
+    # - contents: read -> checkout
+    # - pull-requests: write -> to post a summary comment (optional)
     permissions:
       contents: read
       pull-requests: write
@@ -110,7 +110,7 @@ jobs:
           #   github.com:443
           #   objects.githubusercontent.com:443
 
-      - name: Checkout repository (no persisted creds)
+      - name: Checkout repository 
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
@@ -122,7 +122,7 @@ jobs:
         with:
           comment-summary-in-pr: always     # requires pull-requests: write
           # Enforcement knobs (uncomment to gate merges):
-          # fail-on-severity: moderate      # block if any vuln ≥ moderate
+          # fail-on-severity: moderate      # block if any vuln >= moderate
           # fail-on-cvss: 7                 # or gate by CVSS score
           # deny-licenses: GPL-1.0-or-later, LGPL-2.0-or-later
           # allow-ghsas: GHSA-xxxx-...,GHSA-yyyy-...   # fine-grained allowlist
@@ -136,48 +136,60 @@ jobs:
     name: Dependency review (push)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Tighter: no PR write on push
+    # No PR write on push
     permissions:
       contents: read
 
     steps:
-      - name: Harden runner (egress audit)
+      - name: Harden runner 
         uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       # We need at least the previous commit for a diff; fetch-depth: 2 is enough.
-      - name: Checkout repository (no persisted creds)
+      - name: Checkout repository 
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
           fetch-depth: 2
 
       # Compute a safe base ref for pushes:
-      #  • Prefer github.event.before (the previous SHA)
-      #  • If unavailable (e.g., force-push or first commit), fall back to HEAD^ if possible,
+      #  - Prefer github.event.before (the previous SHA)
+      #  - If unavailable (e.g., force-push or first commit), fall back to HEAD^ if possible,
       #    else to the empty tree, which treats everything as "added".
       - name: Determine base ref for push
         id: base
+        if: ${{ github.event_name == 'push' }}
         shell: bash
         env:
           BEFORE: ${{ github.event.before }}   # previous commit SHA on push events
+          CREATED: ${{ github.event.created }}
         run: |
           set -euo pipefail
-          BEFORE="${BEFORE:-}"
-          if [[ -n "$BEFORE" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
-            echo "base=$BEFORE" >> "$GITHUB_OUTPUT"
-          else
-            if git rev-parse HEAD^ >/dev/null 2>&1; then
-              echo "base=$(git rev-parse HEAD^)" >> "$GITHUB_OUTPUT"
-            else
-              # empty tree object (treats all files as additions)
-              echo "base=4b825dc642cb6eb9a060e54bf8d69288fbee4904" >> "$GITHUB_OUTPUT"
-            fi
+
+          # Compute empty-tree OID 
+          EMPTY_TREE="$(git hash-object -t tree /dev/null)"
+
+          # If this push created the ref, there is no previous base
+          if [[ "${CREATED:-false}" == "true" ]]; then
+            echo "base=$EMPTY_TREE" >> "$GITHUB_OUTPUT"
+            echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          # Otherwise prefer the 'before' SHA if it resolves to a real commit
+          BEFORE="${BEFORE:-}"
+          if [[ -n "$BEFORE" ]] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "base=$BEFORE" >> "$GITHUB_OUTPUT"
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            echo "base=$(git rev-parse HEAD^)" >> "$GITHUB_OUTPUT"
+          else
+            echo "base=$EMPTY_TREE" >> "$GITHUB_OUTPUT"
+          fi
+
           echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # Run Dependency Review comparing base→head on push
+      # Run Dependency Review comparing base->head on push
       - name: Dependency Review (push)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
