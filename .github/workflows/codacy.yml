@@ -1,45 +1,45 @@
-# Codacy Security Scan → Split SARIF runs (hardened, pinned, least-privilege)
+# Codacy Security Scan -> Split SARIF runs (hardened, pinned, least-privilege)
 # =============================================================================
 # What this workflow does (high level):
-#   1) Checks out your code with read-only permissions and no persisted creds.
+#   1) Checks out your code with read-only permissions and no persisted credentials.
 #   2) Runs Codacy Analysis CLI (via pinned action) to generate SARIF results.
-#   3) Splits MULTI-run SARIF into SINGLE-run SARIF files (one per analyzer).
-#   4) Uploads each SINGLE-run SARIF to GitHub Code Scanning with a unique category.
+#   3) Splits multi-run SARIF into single-run SARIF files (one per analyzer).
+#   4) Uploads each single-run SARIF to GitHub Code Scanning with a unique category.
 #   5) Stores the split SARIFs as a build artifact for auditing.
 #
 # Why we split:
-#   • GitHub Code Scanning now requires one SARIF "run" per upload+category.
+#   - GitHub Code Scanning now requires one SARIF "run" per upload+category.
 #     Codacy often outputs multiple runs in a single SARIF (one per tool).
 #     Splitting ensures every upload contains exactly one run, avoiding rejections.
 #
 # Best practices implemented:
-#   • Default-deny permissions at the workflow level; jobs elevate only what they need.
-#   • Pin third-party actions to commit SHAs (reproducible, tamper resistant).
-#   • Guard untrusted PRs (use pull_request, not pull_request_target).
-#   • Concurrency cancels superseded runs to prevent CI pile-ups.
-#   • Timeouts cap spend and fail fast.
-#   • Harden network egress (start in audit; later flip to block + allowlist).
-#   • Scoped checkout creds (no pushes from this workflow).
-#   • Explicit runner (ubuntu-24.04) for reproducibility.
-#   • Results are auditable (artifact with retention).
+#   - Default-deny permissions at the workflow level; jobs elevate only what they need.
+#   - Pin third-party actions to commit SHAs (reproducible, tamper resistant).
+#   - Guard untrusted PRs (use pull_request, not pull_request_target).
+#   - Concurrency cancels superseded runs to prevent CI pile-ups.
+#   - Timeouts cap spend and fail fast.
+#   - Harden network egress with StepSecurity.
+#   - Scoped checkout credentials (no pushes from this workflow).
+#   - Explicit runner (ubuntu-24.04) for reproducibility.
+#   - Results are auditable (artifact with retention).
 #
 # Tuning notes:
-#   • Narrow the 'paths:' filters below to save CI minutes (keep only your languages/manifests).
-#   • Decide gating: keep informational (continue-on-error) or fail PRs on findings.
+#   - Narrow the 'paths:' filters below to save CI minutes (keep only your languages/manifests).
+#   - Decide gating: keep informational (continue-on-error) or fail PRs on findings.
 
 name: Codacy Security Scan
 
 on:
   # Run on PRs to surface issues before merge.
   pull_request:
-    branches: [ "main" ]                 # Tune to your branching model.
+    branches: [ "**" ] # [ "main" ]                 # Tune to your branching model.
     paths:
-      - "**/*"                           # TIP: Narrow to your actual ecosystems for speed.
+      - "**/*"                           # Narrow to your actual ecosystems for speed.
       - ".github/workflows/codacy.yml"
 
   # Also run on pushes to main so direct commits are covered.
   push:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     paths:
       - "**/*"
       - ".github/workflows/codacy.yml"
@@ -63,13 +63,13 @@ permissions:
 jobs:
   # ────────────────────────────── Job 1: Scan + Split ──────────────────────────────
   codacy-scan:
-    name: Codacy scan → split SARIF
+    name: Codacy scan -> split SARIF
     runs-on: ubuntu-24.04                 # Explicit runner for reproducibility.
     timeout-minutes: 20                   # Upper bound for runtime.
     # Least privilege: only what's needed to read the repo.
     permissions:
       contents: read
-      actions: read                       # Harmless; some setups use it for status reads.
+      actions: read                       # Some setups use it for status reads.
 
     # Make outputs available to the next job (JSON array describing per-run SARIFs).
     outputs:
@@ -95,7 +95,7 @@ jobs:
           #   github.com:443
           #   ghcr.io:443
 
-      # Checkout with no persisted credentials (we don’t push).
+      # Checkout with no persisted credentials.
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -103,7 +103,7 @@ jobs:
           fetch-depth: 0                  # Full history (safe default, some tools use blame).
 
       # Run Codacy Analysis CLI via pinned action.
-      # Keep the step green (continue-on-error + very high max-allowed-issues) so we ALWAYS upload SARIF.
+      # Keep the step green (continue-on-error + very high max-allowed-issues) so we always upload SARIF.
       - name: Run Codacy Analysis CLI
         continue-on-error: true           # Let GitHub enforce gates; ensures upload still runs.
         uses: codacy/codacy-analysis-cli-action@562ee3e92b8e92df8b67e0a5ff8aa8e261919c08 # v4.4.7
@@ -114,10 +114,10 @@ jobs:
           output: ${{ env.SARIF_OUT }}
           gh-code-scanning-compat: true
           max-allowed-issues: 2147483647  # Keep CI green; Code Scanning handles gating.
-        # If you want to FAIL the job on findings: remove continue-on-error and lower max-allowed-issues.
+        # If you want to fail the job on findings: remove continue-on-error and lower max-allowed-issues.
 
-      # Split MULTI-run SARIF → many SINGLE-run SARIFs (one per analyzer) under ./reports.
-      # Rationale: GitHub requires one run per upload+category (policy mid-2025).
+      # Split multi-run SARIF → many single-run SARIFs (one per analyzer) under ./reports.
+      # Rationale: GitHub requires one run per upload+category.
       - name: Split SARIF into single-run files
         id: split
         shell: bash
@@ -177,7 +177,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-      actions: read                       # Required in private repos for upload action status.
+      actions: read                       # Used in private repos for upload action status.
 
     strategy:
       fail-fast: false
@@ -198,7 +198,7 @@ jobs:
           name: codacy-sarif-split
           path: reports
 
-      # Upload ONE run per upload+category, per GitHub policy.
+      # Upload one run per upload+category, per GitHub policy.
       - name: Upload SARIF (single run)
         uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
         with:
