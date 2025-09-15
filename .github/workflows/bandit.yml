@@ -10,22 +10,22 @@
 #   5) Uploads SARIF to GitHub Code Scanning; also stores it as a build artifact.
 #
 # Why these patterns (best practices recap):
-#   • Default-deny permissions at the workflow level; elevate only where needed.
-#   • Pin third-party actions to commit SHAs for tamper-resistance and reproducibility.
-#   • Guard untrusted PRs: use pull_request (not pull_request_target).
-#   • Concurrency cancels superseded runs to avoid CI pile-ups.
-#   • Timeouts cap spend and fail fast.
-#   • Hardened egress: start with audit; later switch to block + allowlist.
-#   • Scoped checkout creds: no persisted token since we don’t push.
-#   • Explicit runner + pinned tool versions → deterministic builds.
-#   • Results are auditable: SARIF uploaded to Code Scanning and saved as an artifact.
+#   - Default-deny permissions at the workflow level; elevate only where needed.
+#   - Pin third-party actions to commit SHAs for tamper-resistance and reproducibility.
+#   - Guard untrusted PRs: use pull_request (not pull_request_target).
+#   - Concurrency cancels superseded runs to avoid CI pile-ups.
+#   - Timeouts cap spend and fail fast.
+#   - Hardened egress via StepSecurity.
+#   - Scoped checkout creds: no persisted token.
+#   - Explicit runner + pinned tool versions -> deterministic builds.
+#   - Results are auditable: SARIF uploaded to Code Scanning and saved as an artifact.
 
 name: Bandit
 
 on:
-  # Run when Python code or Bandit config changes on main.
+  # Run when Python code or Bandit config changes.
   push:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     paths:
       - "**/*.py"
       - "pyproject.toml"
@@ -38,7 +38,7 @@ on:
       - ".github/workflows/bandit.yml"
   # Evaluate untrusted PRs safely (no secrets beyond minimal job scope).
   pull_request:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     paths:
       - "**/*.py"
       - "pyproject.toml"
@@ -66,14 +66,14 @@ permissions:
 
 jobs:
   bandit:
-    name: Bandit scan → SARIF
+    name: Bandit scan -> SARIF
     runs-on: ubuntu-24.04            # Pin runner for reproducibility
     timeout-minutes: 15              # Cap total runtime (fail fast)
 
     # Least-privilege job permissions:
-    # - contents: read        → needed for checkout
-    # - security-events: write→ needed to upload SARIF to Code Scanning
-    # - actions: read         → required in private repos for upload-sarif to read run status
+    # - contents: read         -> needed for checkout
+    # - security-events: write -> needed to upload SARIF to Code Scanning
+    # - actions: read          -> required in private repos for upload-sarif to read run status
     permissions:
       contents: read
       security-events: write
@@ -156,7 +156,7 @@ jobs:
           tmp="$(mktemp -d)"
           # 1) Download exact artifacts for this env (wheels preferred)
           python -m pip download --only-binary=:all: -d "$tmp" "bandit[sarif,toml]==${BANDIT_VERSION}"
-          # 2) Build a lock file from artifacts ONLY (never include the lock itself)
+          # 2) Build a lock file from artifacts only
           lock="$tmp/lock.txt"; : > "$lock"
           while IFS= read -r f; do
             h="$(sha256sum "$f" | awk '{print $1}')"
@@ -171,7 +171,7 @@ jobs:
       # Run Bandit with native SARIF output.
       # --exit-zero keeps CI green; remove it to enforce gating (failing on findings).
       # --exclude skips common noisy directories; adjust to your repo.
-      - name: Run Bandit → SARIF
+      - name: Run Bandit -> SARIF
         shell: bash
         run: |
           set -euxo pipefail
