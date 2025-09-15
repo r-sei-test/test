@@ -59,7 +59,7 @@ jobs:
   build-and-scan:
     name: Build and analyze
     runs-on: ubuntu-24.04            # Explicit runner version for reproducibility
-    timeout-minutes: 15              # Cap time for the job
+    timeout-minutes: 30              # Cap time for the job
     permissions:
       contents: read                 # Read‑only; no secret write scopes here
     env:
