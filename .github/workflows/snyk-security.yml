@@ -8,35 +8,34 @@
 #   2) Job "upload-sarif": uploads the SARIF to GitHub Code Scanning (Security tab).
 #      - Only this job has permission to write security events (least privilege).
 #
-# Why this structure (best practices you asked for):
-#   • Default-deny permissions at workflow level; jobs elevate only what they need.
-#   • SHA-pinned actions and an explicit runner version (ubuntu-24.04).
-#   • Concurrency cancels superseded runs to avoid CI pile-ups.
-#   • Timeouts cap spend and fail fast.
-#   • Egress hardening: start in audit; later flip to block + allowlist.
-#   • Scoped checkout creds (we never push in this workflow).
+# Why this structure:
+#   - Default-deny permissions at workflow level; jobs elevate only what they need.
+#   - SHA-pinned actions and an explicit runner version (ubuntu-24.04).
+#   - Concurrency cancels superseded runs to avoid CI pile-ups.
+#   - Timeouts cap spend and fail fast.
+#   - Egress hardening: start in audit; later flip to block + allowlist.
+#   - Scoped checkout credentials.
 #
 # Setup you must do once:
-#   • Create a Snyk API token in Snyk (Account settings → API token).
-#   • Add it to your repo: Settings → Secrets and variables → Actions → New repository secret
+#   - Create a Snyk API token in Snyk (Account settings -> API token).
+#   - Add it to your repo: Settings -> Secrets and variables -> Actions -> New repository secret
 #       Name: SNYK_TOKEN
 #       Value: <paste your token>
-#   • This workflow maps that secret to env.SNYK_TOKEN and *tests the env var* in `if:` conditions.
-#     (Never reference `secrets.*` directly inside an `if:` expression.)
+#   - This workflow maps that secret to env.SNYK_TOKEN and *tests the env var* in `if:` conditions.
 
 name: Snyk Security
 
 on:
-  # Scan proposed changes safely (secrets are not exposed to forked PRs)
+  # Scan proposed changes safely 
   pull_request:
-    branches: [ "main" ]                       # ← tune to your branching model
+    branches: [ "**" ] # [ "main" ]
     paths:
-      - "**/*"                                 # ← narrow to your code paths to cut CI cost if desired
+      - "**/*"                                 # narrow to your code paths to cut CI cost if desired
       - ".github/workflows/snyk.yml"
 
   # Cover direct commits to main
   push:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     paths:
       - "**/*"
       - ".github/workflows/snyk.yml"
@@ -46,7 +45,7 @@ on:
 
   # Optional periodic drift check (adjust cadence as needed)
   schedule:
-    - cron: "23 5 * * *"                       # daily at 05:23 UTC
+    - cron: "23 5 * * *"                       # daily at 05:23 
 
 # Cancel older in-flight runs for the same ref/PR (prevents CI pile-ups)
 concurrency:
@@ -60,13 +59,13 @@ permissions:
 jobs:
   # ───────────────────────────────────── Job 1: Scan ─────────────────────────────────────
   snyk-scan:
-    name: Snyk Code scan → SARIF
+    name: Snyk Code scan -> SARIF
     runs-on: ubuntu-24.04                        # explicit runner for reproducibility
     timeout-minutes: 25                          # fail fast instead of hanging
     permissions:
       contents: read                             # only needs to read the repo
 
-    # Map secrets to environment variables ONCE at the job level.
+    # Map secrets to environment variables once at the job level.
     # Use env vars (not secrets.*) in `if:` conditions and when passing to steps.
     env:
       # Snyk API token. If empty (e.g., forked PR), the scan step will be skipped.
@@ -95,19 +94,18 @@ jobs:
           #   snyk.io:443
           #   api.snyk.io:443
 
-      # Checkout with no persisted credentials (we don’t push in this workflow)
+      # Checkout with no persisted credentials
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-          fetch-depth: 0                           # safe default; some tools benefit from history
+          fetch-depth: 0                           # some tools benefit from history
 
       # Run Snyk Code (SAST) and write SARIF.
-      # IMPORTANT:
-      #   • The `if:` checks the *environment variable* (set above), not secrets.*.
-      #   • `continue-on-error: true` keeps the job alive so we can still upload SARIF
-      #     even if vulnerabilities are found (you can tighten this later).
-      - name: Run Snyk Code → SARIF
+      #   - The `if:` checks the *environment variable* (set above), not secrets.*.
+      #   - `continue-on-error: true` keeps the job alive so we can still upload SARIF
+      #     even if vulnerabilities are found (can tighten this later).
+      - name: Run Snyk Code -> SARIF
         if: ${{ env.SNYK_TOKEN != '' }}           # skip safely when token absent (e.g., forked PR)
         uses: snyk/actions/python@e2221410bff24446ba09102212d8bc75a567237d # pinned commit
         continue-on-error: true                   # keep upload step reachable even on findings
@@ -135,7 +133,7 @@ jobs:
             echo "has_sarif=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Keep an auditable copy with explicit retention; never upload secrets.
+      # Keep an auditable copy with explicit retention.
       - name: Upload SARIF as artifact
         if: always() && steps.check.outputs.has_sarif == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
