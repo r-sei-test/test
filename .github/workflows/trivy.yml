@@ -99,7 +99,7 @@ jobs:
       #   - ignore-unfixed: true -> reduce noise from issues without available fixes
       #   - exit-code: "0" -> keep the job green so we always upload SARIF
       - name: Trivy vuln scan -> SARIF
-        uses: aquasecurity/trivy-action@f9424c10c36e288d5fa79bd3dfd1aeb2d6eae808 # pinned commit
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # pinned commit
         with:
           scan-type: fs
           scan-ref: .
@@ -113,7 +113,7 @@ jobs:
 
       # ── Scan 2: IaC/config misconfigurations ─────────────────────────────────────
       - name: Trivy config scan -> SARIF
-        uses: aquasecurity/trivy-action@f9424c10c36e288d5fa79bd3dfd1aeb2d6eae808 # pinned commit
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # pinned commit
         with:
           scan-type: fs
           scan-ref: .
@@ -125,7 +125,7 @@ jobs:
 
       # ── Scan 3: Secrets (hard-coded credentials, tokens, etc.) ───────────────────
       - name: Trivy secret scan -> SARIF
-        uses: aquasecurity/trivy-action@f9424c10c36e288d5fa79bd3dfd1aeb2d6eae808 # pinned commit
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # pinned commit
         with:
           scan-type: fs
           scan-ref: .
