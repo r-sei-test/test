@@ -1,25 +1,25 @@
 # OSV-Scanner (hardened, pinned, least-privilege)
 # =============================================================================
-# PURPOSE
-#   Run Google's OSV-Scanner v2 against your repository to detect known
+# What this workflow does:
+#   Run Google's OSV-Scanner against your repository to detect known
 #   vulnerabilities in dependencies, produce a SARIF report, and publish
 #   the results to GitHub Code Scanning (Security tab).
 #
-# DESIGN CHOICES (security & reliability)
-#   • Default-deny permissions at the workflow level; jobs elevate only what they need.
-#   • SHA-pinned third-party actions for reproducibility and tamper resistance.
-#   • Explicit runner version (ubuntu-24.04) for deterministic behavior.
-#   • Concurrency cancels superseded runs and prevents CI pile-ups.
-#   • Timeouts cap spend and fail fast.
-#   • Egress hardening starts in 'audit'; later switch to 'block' with an allowlist.
-#   • Two-job split: the scan job is read-only; only the uploader can write security events.
-#   • Guarded artifact flow: upload artifact only if a SARIF was generated; uploader runs only then.
+# Key security & reliability patterns:
+#   - Default-deny permissions at the workflow level; jobs elevate only what they need.
+#   - SHA-pinned third-party actions for reproducibility and tamper resistance.
+#   - Explicit runner version (ubuntu-24.04) for deterministic behavior.
+#   - Concurrency cancels superseded runs and prevents CI pile-ups.
+#   - Timeouts cap spend and fail fast.
+#   - Egress hardening starts in 'audit'; later switch to 'block' with an allowlist.
+#   - Two-job split: the scan job is read-only; only the uploader can write security events.
+#   - Guarded artifact flow: upload artifact only if a SARIF was generated; uploader runs only then.
 #
-# OPERATIONAL NOTES
-#   • OSV v2 command is `osv-scanner scan ...`.
-#   • `--allow-no-lockfiles` avoids failing the run when no manifests are present.
+# Notes:
+#   - OSV v2 command is `osv-scanner scan ...`.
+#   - `--allow-no-lockfiles` avoids failing the run when no manifests are present.
 #     Remove it once your repo consistently contains lockfiles/SBOMs.
-#   • To gate merges on findings, add `--fail-on=all` (or `--severity=HIGH,CRITICAL`)
+#   - To gate merges on findings, add `--fail-on=all` (or `--severity=HIGH,CRITICAL`)
 #     and remove `continue-on-error: true` in the scan step.
 
 name: OSV-Scanner
@@ -27,7 +27,7 @@ name: OSV-Scanner
 on:
   # Scan proposed changes so reviewers see issues before merge.
   pull_request:
-    branches: [ "main" ]                             # Adjust to your default branch naming.
+    branches: [ "**" ] # [ "main" ]                  # Adjust to your default branch naming.
     paths:                                           # Narrow paths to dependency manifests to cut cost.
       - "**/package.json"
       - "**/package-lock.json"
@@ -50,23 +50,16 @@ on:
       - "**/*.fsproj"
       - ".github/workflows/osv-scanner.yml"
 
-  # Merge queue batches (optional): catch issues in the combined set scheduled to merge.
-  merge_group:
-    branches: [ "main" ]
-    paths:
-      - "**/*"
-      - ".github/workflows/osv-scanner.yml"
-
   # Cover direct pushes to main (fast-forwards, admin merges, etc.).
   push:
-    branches: [ "main" ]
+    branches: [ "**" ] # [ "main" ]
     paths:
       - "**/*"
       - ".github/workflows/osv-scanner.yml"
 
   # Periodic drift check to surface newly disclosed issues against existing locks.
   schedule:
-    - cron: "18 6 * * 1"                             # Mondays 06:18 UTC
+    - cron: "18 6 * * 1"                             # Mondays 06:18 
 
   # Manual trigger for ad-hoc scans.
   workflow_dispatch: {}
@@ -83,7 +76,7 @@ permissions:
 jobs:
   # ───────────────────────────────────────── Scan job (read-only) ─────────────────────────────────────────
   osv-scan:
-    name: OSV scan → SARIF
+    name: OSV scan -> SARIF
     runs-on: ubuntu-24.04                              # Explicit OS for reproducibility.
     timeout-minutes: 20                                 # Bound execution time.
     permissions:
@@ -92,7 +85,7 @@ jobs:
     # Job-level env keeps secrets out of `if:` expressions and centralizes config.
     env:
       OSV_VERSION: v2.2.2                               # Pin OSV-Scanner major/minor on purpose.
-      SARIF_OUT: osv.sarif                              # Write SARIF to repo root → no mkdir needed.
+      SARIF_OUT: osv.sarif                              # Write SARIF to repo root -> no mkdir needed.
 
     # Expose whether a SARIF exists so the upload job can decide to run.
     outputs:
@@ -132,11 +125,11 @@ jobs:
           osv-scanner --version
 
       # Run the scan:
-      #   • `scan -r .` recursively searches for supported lockfiles/SBOMs.
-      #   • `--allow-no-lockfiles` converts “no manifests found” into success (exit 0).
+      #   - `scan -r .` recursively searches for supported lockfiles/SBOMs.
+      #   - `--allow-no-lockfiles` converts “no manifests found” into success (exit 0).
       #     Remove this once your repo always has manifests; or replace with explicit `-L` flags.
-      #   • `continue-on-error: true` ensures we still publish SARIF if vulnerabilities are found.
-      - name: Run OSV-Scanner → SARIF
+      #   - `continue-on-error: true` ensures we still publish SARIF if vulnerabilities are found.
+      - name: Run OSV-Scanner -> SARIF
         continue-on-error: true
         run: |
           osv-scanner scan -r . \
