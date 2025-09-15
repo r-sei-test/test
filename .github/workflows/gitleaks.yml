@@ -4,17 +4,17 @@
 #   1) Checks out your repository with read-only permissions and no persisted credentials.
 #   2) Runs Gitleaks (pinned to a commit SHA) to scan for hard-coded secrets.
 #   3) Writes a SARIF report to the workspace root (relative path).
-#   4) Uploads the SARIF to GitHub Code Scanning IF the file exists.
+#   4) Uploads the SARIF to GitHub Code Scanning if the file exists.
 #
 # Key security & reliability patterns:
-#   • Default-deny permissions at the workflow level (read-only by default).
-#   • Least privilege in the job (add security-events: write only for SARIF upload).
-#   • SHA-pinned third-party actions (reproducible, tamper-resistant).
-#   • Concurrency to cancel superseded runs.
-#   • Timeouts to cap spend and fail fast.
-#   • Hardened network egress (audit now; block + allowlist later).
-#   • Scoped checkout credentials (we never persist a token; we don’t push).
-#   • Conditional upload: the SARIF uploader runs only if the file is present.
+#   - Default-deny permissions at the workflow level (read-only by default).
+#   - Least privilege in the job (add security-events: write only for SARIF upload).
+#   - SHA-pinned third-party actions (reproducible, tamper-resistant).
+#   - Concurrency to cancel superseded runs.
+#   - Timeouts to cap spend and fail fast.
+#   - Hardened network egress with StepSecurity.
+#   - Scoped checkout credentials.
+#   - Conditional upload: the SARIF uploader runs only if the file is present.
 
 name: gitleaks
 
@@ -22,7 +22,7 @@ on:
   pull_request:
   push:
   schedule:
-    - cron: "0 4 * * *"   # daily at 04:00 UTC
+    - cron: "0 4 * * *"   # daily at 04:00 
   workflow_dispatch:
 
 concurrency:
@@ -35,15 +35,11 @@ permissions:
 jobs:
   scan:
 
-    name: Gitleaks scan → Code Scanning
+    name: Gitleaks scan -> Code Scanning
     runs-on: ubuntu-24.04                 # Pin runner for reproducibility
     timeout-minutes: 20                   # Upper bound for this job
 
     # Least-privilege job scopes:
-    # - contents: read         → required for checkout
-    # - security-events: write → required to upload SARIF to Code Scanning
-    # - actions: read          → required in private repos so upload-sarif can read run status
-
     permissions:
       contents: read
       security-events: write
@@ -54,7 +50,7 @@ jobs:
       REPORT_PATH: gitleaks.sarif
 
     steps:
-      # Harden egress. Start in audit mode to learn endpoints. Once stable, flip to:
+      # Harden egress. Start in audit mode to learn endpoints. Once stable, change to:
       #   egress-policy: block
       # and allowlist only what you need (api.github.com, uploads.github.com, etc.).
       - name: Harden runner (egress audit)
@@ -73,7 +69,7 @@ jobs:
       # Notes:
       #  - Gitleaks exits non-zero if leaks are found. We keep the job alive with
       #    `continue-on-error: true` so the SARIF upload can still run.
-      #  - We write the report to a RELATIVE path at repo root (./gitleaks.sarif),
+      #  - We write the report to a relative path at repo root (./gitleaks.sarif),
       #    which the container sees under /github/workspace/gitleaks.sarif.
       #  - If you maintain a baseline/allowlist, commit `.gitleaks.toml`
       #    and uncomment `config-path` below.
@@ -93,14 +89,14 @@ jobs:
           # config-path: .gitleaks.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # optional; used by some org features
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # optional; used by some features
 
       # Upload SARIF to Code Scanning (Security tab).
-      # IMPORTANT: This step runs ONLY if the SARIF file exists and is non-empty.
-      #   • If Gitleaks produces no report file (some builds do this when there are zero findings),
-      #     then NOTHING is uploaded. This is expected.
-      #   • If Gitleaks produces an “empty” SARIF (file exists with zero results),
-      #     it WILL be uploaded and Code Scanning will show no alerts for this run.
+      # This step runs if the SARIF file exists and is non-empty.
+      #   - If Gitleaks produces no report file (some builds do this when there are zero findings),
+      #     then nothing is uploaded. This is expected.
+      #   - If Gitleaks produces an “empty” SARIF (file exists with zero results),
+      #     it will be uploaded and Code Scanning will show no alerts for this run.
       - name: Upload SARIF to Code Scanning
         if: always() && hashFiles('gitleaks.sarif') != ''
         uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
