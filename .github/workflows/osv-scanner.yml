@@ -137,11 +137,30 @@ jobs:
           go-version: "1.23.x"
 
       # Install OSV-Scanner v2 at the pinned tag and verify it runs.
-      - name: Install OSV-Scanner v2 (pinned)
+      - name: Install OSV-Scanner (pinned)
+        shell: bash
         run: |
-          echo "$HOME/go/bin" >> "$GITHUB_PATH"              # Put the Go bin directory on PATH.
-          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@${OSV_VERSION}
+          set -euo pipefail
+          VER="v2.2.2"
+          BASE="https://github.com/google/osv-scanner/releases/download"
+          TAR="osv-scanner_${VER#v}_linux_amd64.tar.gz"
+
+          tmp="$(mktemp -d)"
+          curl -sSfL "$BASE/$VER/$TAR" -o "$tmp/osv.tgz"
+          tar -C "$tmp" -xzf "$tmp/osv.tgz"
+
+          mkdir -p "$HOME/.local/bin"
+          mv "$tmp/osv-scanner" "$HOME/.local/bin/osv-scanner"
+          chmod +x "$HOME/.local/bin/osv-scanner"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
           osv-scanner --version
+
+      - name: Generate SBOM (CycloneDX) with Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $HOME/.local/bin v1.17.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          syft . -o cyclonedx-json=sbom.json
 
       # Run the scan:
       #   - `scan -r .` recursively searches for supported lockfiles/SBOMs.
@@ -151,6 +170,10 @@ jobs:
       #   - Dual output: SARIF (for GitHub UI) + JSON (for experimental_generic_findings).
       - name: Run OSV-Scanner → SARIF + JSON
         continue-on-error: true
+        shell: bash
+        env:
+          SARIF_OUT: osv.sarif
+          JSON_OUT:  osv.json
         run: |
           osv-scanner scan -r . \
             --allow-no-lockfiles \
@@ -158,6 +181,12 @@ jobs:
             --experimental-plugins lockfile,sbom,directory,artifact,govulncheck,weakcreds,cis \
             --format sarif --output "${SARIF_OUT}" \
             --format json  --output "${JSON_OUT}"
+
+          # Ensure empty SARIF/JSON exist when no sources were found
+          [[ -s "$SARIF_OUT" ]] || cat > "$SARIF_OUT" <<'JSON'
+      {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"osv-scanner"}},"results":[]}]} 
+      JSON
+          [[ -s "$JSON_OUT" ]] || echo '{}' > "$JSON_OUT"
 
       # Record whether a SARIF file exists. The next step and the next job use this signal.
       - name: Check SARIF exists
