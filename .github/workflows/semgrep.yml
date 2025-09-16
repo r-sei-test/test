@@ -66,6 +66,8 @@ jobs:
       SEMGREP_VERSION: "1.134.0"
       # SARIF output path (relative to workspace)
       SARIF_FILE: "semgrep.sarif"
+      # CWE-enriched SARIF path
+      SARIF_ENRICHED_FILE: "semgrep.cwe-tagged.sarif"
 
     # Expose whether SARIF exists so the upload job can decide to run
     outputs:
@@ -172,8 +174,67 @@ jobs:
           if [[ -n "${SEMGREP_APP_TOKEN:-}" ]]; then
             semgrep ci --sarif --output "${SARIF_FILE}"
           else
-            semgrep scan --config p/ci --sarif --output "${SARIF_FILE}"
+            # semgrep scan --config p/ci --sarif --output "${SARIF_FILE}"
+            semgrep scan --config auto \
+            --config p/owasp-top-ten \
+            --config p/cwe-top-25 \
+            --config p/security-audit \
+            --config p/secrets \
+            --timeout=30 \
+            --timeout-threshold=0 \
+            --max-target-bytes=0 \
+            --dataflow-traces \
+            --sarif --output "${SARIF_FILE}"
           fi
+
+      # NEW: Add CWE tags to SARIF from Semgrep rule metadata ONLY (no path/filename inference)
+      - name: Enrich SARIF with CWE tags (Semgrep metadata only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - << 'PY'
+          import json, re, os
+
+          src = os.environ.get("SARIF_FILE", "semgrep.sarif")
+          dst = os.environ.get("SARIF_ENRICHED_FILE", "semgrep.cwe-tagged.sarif")
+
+          with open(src, 'r', encoding='utf-8') as f:
+              sarif = json.load(f)
+
+          # Inject taxonomy tags based solely on Semgrep rule metadata already present in SARIF.
+          # We DO NOT look at filenames, directories, or function names.
+          for run in sarif.get("runs", []):
+              driver = (run.get("tool") or {}).get("driver") or {}
+              for rule in (driver.get("rules") or []):
+                  props = rule.setdefault("properties", {})
+                  tags  = set(props.get("tags", []))
+
+                  # Pull CWE ids from existing rule tags like "CWE-79" or "CWE-079".
+                  cwes = set()
+                  for t in list(tags):
+                      m = re.search(r"\bCWE-?(\d{1,4})\b", t, flags=re.IGNORECASE)
+                      if m:
+                          cwes.add(int(m.group(1)))
+
+                  # (Optional) Some Semgrep SARIFs carry metadata in properties.metadata.cwe
+                  md = props.get("metadata") if isinstance(props.get("metadata"), dict) else None
+                  if md:
+                      val = md.get("cwe") or md.get("cwes")
+                      vals = val if isinstance(val, list) else ([val] if isinstance(val, str) else [])
+                      for v in vals:
+                          m = re.search(r"\bCWE-?(\d{1,4})\b", str(v), flags=re.IGNORECASE)
+                          if m:
+                              cwes.add(int(m.group(1)))
+
+                  # Add GitHub-recognized taxonomy tags
+                  for n in sorted(cwes):
+                      tags.add(f"external/cwe/cwe-{n:03d}")
+
+                  props["tags"] = sorted(tags)
+
+          with open(dst, 'w', encoding='utf-8') as f:
+              json.dump(sarif, f, indent=2)
+          PY
 
       # Verify we actually produced a SARIF (guards the upload job)
       - name: Check SARIF exists
@@ -181,7 +242,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -s "${SARIF_FILE}" ]]; then
+          if [[ -s "${SARIF_ENRICHED_FILE}" ]]; then
             echo "has_sarif=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_sarif=false" >> "$GITHUB_OUTPUT"
@@ -193,7 +254,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: semgrep-sarif
-          path: ${{ env.SARIF_FILE }}
+          path: ${{ env.SARIF_ENRICHED_FILE }}
           retention-days: 14
 
   # ────────────────────────────────── Job 2: Upload ──────────────────────────────────
@@ -228,5 +289,5 @@ jobs:
       - name: Upload SARIF to GitHub Security Dashboard
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
         with:
-          sarif_file: semgrep.sarif
+          sarif_file: semgrep.cwe-tagged.sarif
           category: semgrep
