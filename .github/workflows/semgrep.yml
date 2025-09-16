@@ -71,7 +71,10 @@ jobs:
 
     # Expose whether SARIF exists so the upload job can decide to run
     outputs:
-      has_sarif: ${{ steps.check.outputs.has_sarif }}
+      has_local:   ${{ steps.check.outputs.has_local }}
+      has_managed: ${{ steps.check.outputs.has_managed }}
+      has_any:     ${{ steps.check.outputs.has_any }}
+
 
     steps:
       # Harden egress. Start with audit to learn endpoints. Later switch to:
@@ -244,15 +247,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ls reports/semgrep.*.cwe.sarif 1>/dev/null 2>&1; then
-            echo "has_sarif=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_sarif=false" >> "$GITHUB_OUTPUT"
-          fi
+          local=false
+          managed=false
+          [[ -s reports/semgrep.local.cwe.sarif   ]] && local=true
+          [[ -s reports/semgrep.managed.cwe.sarif ]] && managed=true
+          echo "has_local=$local"     >> "$GITHUB_OUTPUT"
+          echo "has_managed=$managed" >> "$GITHUB_OUTPUT"
+          echo "has_any=$([[ "$local" == true || "$managed" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
       # Keep an auditable copy with defined retention
       - name: Upload SARIF as artifact
-        if: always() && steps.check.outputs.has_sarif == 'true'
+        if: always() && steps.check.outputs.has_any == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: semgrep-sarif
@@ -267,7 +272,7 @@ jobs:
   upload-sarif:
     name: Upload SARIF to Code Scanning
     needs: semgrep-scan
-    if: ${{ needs.semgrep-scan.outputs.has_sarif == 'true' }}
+    if: ${{ needs.semgrep-scan.outputs.has_any == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -293,14 +298,14 @@ jobs:
 
       # Upload to the Security tab. Category keeps tools distinct.
       - name: Upload SARIF (local)
-        if: ${{ hashFiles('reports/semgrep.local.cwe.sarif') != '' }}
+        if: ${{ needs.semgrep-scan.outputs.has_local == 'true' }}
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
         with:
           sarif_file: reports/semgrep.local.cwe.sarif
           category: semgrep-local
 
       - name: Upload SARIF (managed)
-        if: ${{ hashFiles('reports/semgrep.managed.cwe.sarif') != '' }}
+        if: ${{ needs.semgrep-scan.outputs.has_managed == 'true' }}
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
         with:
           sarif_file: reports/semgrep.managed.cwe.sarif
