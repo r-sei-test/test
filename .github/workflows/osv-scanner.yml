@@ -167,7 +167,6 @@ jobs:
           osv-scanner scan -r . \
             --allow-no-lockfiles \
             --call-analysis \
-            --experimental-plugins lockfile,sbom,directory,artifact \
             --format sarif --output "${SARIF_OUT}" \
             --format json  --output "${JSON_OUT}"
 
