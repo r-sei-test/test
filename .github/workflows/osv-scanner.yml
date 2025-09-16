@@ -96,7 +96,7 @@ jobs:
 
     # Job-level env keeps secrets out of `if:` expressions and centralizes config.
     env:
-      OSV_VERSION: v2.2.2                               # Pin OSV-Scanner major/minor on purpose.
+      OSV_VERSION: v2.0.3                               # Pin OSV-Scanner major/minor on purpose.
       SARIF_OUT: osv.sarif                              # Write SARIF to repo root -> no mkdir needed.
       JSON_OUT: osv.json                                # Extra JSON file captures experimental findings.
 
