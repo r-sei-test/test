@@ -141,7 +141,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VER="v2.2.2"
+          VER="v2.0.3"
           BASE="https://github.com/google/osv-scanner/releases/download"
           TAR="osv-scanner_${VER#v}_linux_amd64.tar.gz"
 
