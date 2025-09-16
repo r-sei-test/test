@@ -161,79 +161,81 @@ jobs:
           fi
 
       # Run Semgrep and write SARIF.
-      # If SEMGREP_APP_TOKEN is set -> 'semgrep ci' (uses organization policies).
-      # Else -> 'semgrep scan --config p/ci' (curated rules for CI).
       # By default Semgrep exits 0 even with findings; to gate merges, add `--error`
       # or configure blocking policies in Semgrep App.
-      - name: Run Semgrep -> SARIF
+      - name: Run Semgrep -> SARIF (local + managed if token)
         shell: bash
         env:
           SEMGREP_BASELINE_COMMIT: ${{ steps.base.outputs.baseline }}
         run: |
           set -euo pipefail
-          if [[ -n "${SEMGREP_APP_TOKEN:-}" ]]; then
-            semgrep ci --sarif --output "${SARIF_FILE}"
-          else
-            # semgrep scan --config p/ci --sarif --output "${SARIF_FILE}"
-            semgrep scan --config auto \
+          mkdir -p reports
+
+          # Always run the local (curated rules) scan
+          semgrep scan --config auto \
             --config p/owasp-top-ten \
             --config p/cwe-top-25 \
             --config p/security-audit \
             --config p/secrets \
+            ${SEMGREP_BASELINE_COMMIT:+--baseline-commit "$SEMGREP_BASELINE_COMMIT"} \
             --timeout=30 \
             --timeout-threshold=0 \
             --max-target-bytes=0 \
             --dataflow-traces \
-            --sarif --output "${SARIF_FILE}"
+            --sarif --output "reports/semgrep.local.sarif" || true
+
+          # If a Semgrep App token is present, also run managed scan (org policies)
+          if [[ -n "${SEMGREP_APP_TOKEN:-}" ]]; then
+            SEMGREP_APP_TOKEN="$SEMGREP_APP_TOKEN" \
+            semgrep ci \
+              ${SEMGREP_BASELINE_COMMIT:+--baseline-commit "$SEMGREP_BASELINE_COMMIT"} \
+              --sarif --output "reports/semgrep.managed.sarif" || true
           fi
 
-      # NEW: Add CWE tags to SARIF from Semgrep rule metadata ONLY (no path/filename inference)
+      # Add CWE tags to SARIF from Semgrep rule metadata ONLY (no path/filename inference)
       - name: Enrich SARIF with CWE tags (Semgrep metadata only)
         shell: bash
         run: |
           set -euo pipefail
           python - << 'PY'
-          import json, re, os
+          import json, re, os, glob, sys, pathlib
+          in_files = [p for p in glob.glob("reports/semgrep.*.sarif") if os.path.getsize(p) > 0]
+          if not in_files:
+              sys.exit(0)
 
-          src = os.environ.get("SARIF_FILE", "semgrep.sarif")
-          dst = os.environ.get("SARIF_ENRICHED_FILE", "semgrep.cwe-tagged.sarif")
+          def enrich(src, dst):
+              with open(src, 'r', encoding='utf-8') as f:
+                  sarif = json.load(f)
+              # Inject taxonomy tags based solely on Semgrep rule metadata already present in SARIF.
+              for run in sarif.get("runs", []):
+                  driver = (run.get("tool") or {}).get("driver") or {}
+                  for rule in (driver.get("rules") or []):
+                      props = rule.setdefault("properties", {})
+                      tags  = set(props.get("tags", []))
+                      # Pull CWE ids from existing rule tags like "CWE-79" or "CWE-079".
+                      cwes = set()
+                      for t in list(tags):
+                          m = re.search(r"\bCWE-?(\d{1,4})\b", t, re.I)
+                          if m: cwes.add(int(m.group(1)))
+                      # (Optional) Some Semgrep SARIFs carry metadata in properties.metadata.cwe
+                      md = props.get("metadata") if isinstance(props.get("metadata"), dict) else None
+                      if md:
+                          val = md.get("cwe") or md.get("cwes")
+                          vals = val if isinstance(val, list) else ([val] if isinstance(val, str) else [])
+                          for v in vals:
+                              m = re.search(r"\bCWE-?(\d{1,4})\b", str(v), re.I)
+                              if m: cwes.add(int(m.group(1)))
+                      # Add GitHub-recognized taxonomy tags
+                      for n in sorted(cwes):
+                          tags.add(f"external/cwe/cwe-{n:03d}")
+                      props["tags"] = sorted(tags)
+              pathlib.Path("reports").mkdir(parents=True, exist_ok=True)
+              with open(dst, 'w', encoding='utf-8') as f:
+                  json.dump(sarif, f, indent=2)
 
-          with open(src, 'r', encoding='utf-8') as f:
-              sarif = json.load(f)
-
-          # Inject taxonomy tags based solely on Semgrep rule metadata already present in SARIF.
-          # We DO NOT look at filenames, directories, or function names.
-          for run in sarif.get("runs", []):
-              driver = (run.get("tool") or {}).get("driver") or {}
-              for rule in (driver.get("rules") or []):
-                  props = rule.setdefault("properties", {})
-                  tags  = set(props.get("tags", []))
-
-                  # Pull CWE ids from existing rule tags like "CWE-79" or "CWE-079".
-                  cwes = set()
-                  for t in list(tags):
-                      m = re.search(r"\bCWE-?(\d{1,4})\b", t, flags=re.IGNORECASE)
-                      if m:
-                          cwes.add(int(m.group(1)))
-
-                  # (Optional) Some Semgrep SARIFs carry metadata in properties.metadata.cwe
-                  md = props.get("metadata") if isinstance(props.get("metadata"), dict) else None
-                  if md:
-                      val = md.get("cwe") or md.get("cwes")
-                      vals = val if isinstance(val, list) else ([val] if isinstance(val, str) else [])
-                      for v in vals:
-                          m = re.search(r"\bCWE-?(\d{1,4})\b", str(v), flags=re.IGNORECASE)
-                          if m:
-                              cwes.add(int(m.group(1)))
-
-                  # Add GitHub-recognized taxonomy tags
-                  for n in sorted(cwes):
-                      tags.add(f"external/cwe/cwe-{n:03d}")
-
-                  props["tags"] = sorted(tags)
-
-          with open(dst, 'w', encoding='utf-8') as f:
-              json.dump(sarif, f, indent=2)
+          for src in in_files:
+              base = os.path.splitext(src)[0]
+              enrich(src, f"{base}.cwe.sarif")
           PY
 
       # Verify we actually produced a SARIF (guards the upload job)
@@ -242,7 +244,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -s "${SARIF_ENRICHED_FILE}" ]]; then
+          if ls reports/semgrep.*.cwe.sarif 1>/dev/null 2>&1; then
             echo "has_sarif=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_sarif=false" >> "$GITHUB_OUTPUT"
@@ -254,8 +256,12 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: semgrep-sarif
-          path: ${{ env.SARIF_ENRICHED_FILE }}
+          path: |
+            reports/semgrep.local.cwe.sarif
+            reports/semgrep.managed.cwe.sarif
+          if-no-files-found: ignore
           retention-days: 14
+
 
   # ────────────────────────────────── Job 2: Upload ──────────────────────────────────
   upload-sarif:
@@ -286,8 +292,16 @@ jobs:
           path: .
 
       # Upload to the Security tab. Category keeps tools distinct.
-      - name: Upload SARIF to GitHub Security Dashboard
+      - name: Upload SARIF (local)
+        if: ${{ hashFiles('reports/semgrep.local.cwe.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
         with:
-          sarif_file: semgrep.cwe-tagged.sarif
-          category: semgrep
+          sarif_file: reports/semgrep.local.cwe.sarif
+          category: semgrep-local
+
+      - name: Upload SARIF (managed)
+        if: ${{ hashFiles('reports/semgrep.managed.cwe.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        with:
+          sarif_file: reports/semgrep.managed.cwe.sarif
+          category: semgrep-managed
