@@ -203,12 +203,11 @@ jobs:
 
       # ── Optional: Upload Snyk OSS SARIF if you enabled the OSS steps above ─────────────
       - name: Download OSS SARIF artifact
-        if: always() 
+        continue-on-error: true
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: snyk-oss-sarif
           path: .
-          if-no-files-found: ignore
       
       - name: Upload OSS SARIF to GitHub Code Scanning
         if: always() && hashFiles('snyk-oss.sarif') != ''
