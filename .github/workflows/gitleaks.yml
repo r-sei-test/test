@@ -66,60 +66,72 @@ jobs:
           persist-credentials: false
           fetch-depth: 0  # full history (useful if you later scan history)
 
+      - name: Install Gitleaks CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="v8.18.4"
+          BASE="https://github.com/gitleaks/gitleaks/releases/download"
+          TAR="gitleaks_${VER#v}_linux_x64.tar.gz"
+
+          tmp="$(mktemp -d)"
+          curl -sSfL "$BASE/$VER/$TAR" -o "$tmp/gitleaks.tgz"
+          tar -C "$tmp" -xzf "$tmp/gitleaks.tgz"
+
+          # Install to a user-writable bin and add to PATH for this job
+          mkdir -p "$HOME/.local/bin"
+          mv "$tmp/gitleaks" "$HOME/.local/bin/gitleaks"
+          chmod +x "$HOME/.local/bin/gitleaks"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          gitleaks version
+
       # Run Gitleaks.
-      # Notes:
-      #  - Gitleaks exits non-zero if leaks are found. We keep the job alive with
-      #    `continue-on-error: true` so the SARIF upload can still run.
-      #  - We write the report to a relative path at repo root (./gitleaks.sarif),
-      #    which the container sees under /github/workspace/gitleaks.sarif.
-      #  - If you maintain a baseline/allowlist, commit `.gitleaks.toml`
-      #    and uncomment `config-path` below.
       - name: Run Gitleaks
         id: gitleaks
         continue-on-error: true
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        with:
-          args: >-
-            detect
-            --source .
-            --redact
-            --no-banner
-            --verbose
-            --report-format sarif
-            --report-path "${{ env.REPORT_PATH }}"
-            --log-opts="--all --remotes --full-history"
-          # config-path: .gitleaks.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # optional; used by some org features
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gitleaks detect \
+            --source . \
+            --redact \
+            --no-banner \
+            --verbose \
+            --report-format sarif \
+            --report-path "${REPORT_PATH}" \
+            --log-opts="--all --remotes --full-history"
 
       # Additional scan of the working tree (untracked/generated files).
       - name: Run Gitleaks (working tree)
         id: gitleaks_workspace
         continue-on-error: true
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        with:
-          args: >-
-            detect
-            --no-git
-            --source .
-            --redact
-            --no-banner
-            --verbose
-            --report-format sarif
-            --report-path "${{ env.WORKSPACE_REPORT_PATH }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }} # optional; used by some org features
-
-      - name: Ensure empty SARIF exists when no findings (optional)
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        shell: bash
         run: |
-          for f in "$REPORT_PATH" "$WORKSPACE_REPORT_PATH"; do
-            [[ -s "$f" ]] && continue
-            cat > "$f" <<'JSON'
-          {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"Gitleaks"}},"results":[]}]} 
-          JSON
-          done
+          set -euo pipefail
+          gitleaks detect \
+            --no-git \
+            --source . \
+            --redact \
+            --no-banner \
+            --verbose \
+            --report-format sarif \
+            --report-path "${WORKSPACE_REPORT_PATH}"
+
+      #- name: Ensure empty SARIF exists when no findings (optional)
+      #  run: |
+      #    for f in "$REPORT_PATH" "$WORKSPACE_REPORT_PATH"; do
+      #      [[ -s "$f" ]] && continue
+      #      cat > "$f" <<'JSON'
+      #    {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"Gitleaks"}},"results":[]}]} 
+      #    JSON
+      #    done
 
       # Upload SARIF to Code Scanning (Security tab).
       # This step runs if the SARIF file exists and is non-empty.
