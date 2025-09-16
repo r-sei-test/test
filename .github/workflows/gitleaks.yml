@@ -70,9 +70,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ver="v8.18.4"
-          curl -sSfL "https://raw.githubusercontent.com/gitleaks/gitleaks/master/install.sh" | \
-            sh -s -- -b /usr/local/bin "$ver"
+          VER="v8.18.4"
+          BASE="https://github.com/gitleaks/gitleaks/releases/download"
+          TAR="gitleaks_${VER#v}_linux_x64.tar.gz"
+
+          tmp="$(mktemp -d)"
+          curl -sSfL "$BASE/$VER/$TAR" -o "$tmp/gitleaks.tgz"
+          tar -C "$tmp" -xzf "$tmp/gitleaks.tgz"
+
+          # Install to a user-writable bin and add to PATH for this job
+          mkdir -p "$HOME/.local/bin"
+          mv "$tmp/gitleaks" "$HOME/.local/bin/gitleaks"
+          chmod +x "$HOME/.local/bin/gitleaks"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
           gitleaks version
 
       # Run Gitleaks.
