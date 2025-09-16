@@ -156,7 +156,6 @@ jobs:
       #   - `--allow-no-lockfiles` converts “no manifests found” into success (exit 0).
       #     Remove this once your repo always has manifests; or replace with explicit `-L` flags.
       #   - `continue-on-error: true` ensures we still publish SARIF if vulnerabilities are found.
-      #   - Dual output: SARIF (for GitHub UI) + JSON (for experimental_generic_findings).
       - name: Run OSV-Scanner → SARIF + JSON
         continue-on-error: true
         shell: bash
@@ -167,14 +166,7 @@ jobs:
           osv-scanner scan -r . \
             --allow-no-lockfiles \
             --call-analysis \
-            --format sarif --output "${SARIF_OUT}" \
-            --format json  --output "${JSON_OUT}"
-
-          # Ensure empty SARIF/JSON exist when no sources were found
-          [[ -s "$SARIF_OUT" ]] || cat > "$SARIF_OUT" <<'JSON'
-          {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"osv-scanner"}},"results":[]}]} 
-          JSON
-          [[ -s "$JSON_OUT" ]] || echo '{}' > "$JSON_OUT"
+            --format sarif --output "${SARIF_OUT}" 
 
       # Record whether a SARIF file exists. The next step and the next job use this signal.
       - name: Check SARIF exists
