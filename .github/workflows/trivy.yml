@@ -3,9 +3,9 @@
 # What this workflow does (big picture):
 #   1) Job "trivy-scan": runs three focused Trivy scans against the repository
 #      and writes three separate SARIF files:
-#        • reports/trivy-vuln.sarif   -> dependency/package vulnerabilities
-#        • reports/trivy-config.sarif -> IaC/config misconfigurations
-#        • reports/trivy-secret.sarif -> hard-coded secrets
+#        - reports/trivy-vuln.sarif   -> dependency/package vulnerabilities
+#        - reports/trivy-config.sarif -> IaC/config misconfigurations
+#        - reports/trivy-secret.sarif -> hard-coded secrets
 #      It then uploads these SARIFs as a build artifact.
 #   2) Job "upload-sarif": downloads the SARIFs and uploads each one to GitHub
 #      Code Scanning under a distinct category. Only this job can write security events.
@@ -104,10 +104,12 @@ jobs:
           scan-type: fs
           scan-ref: .
           scanners: vuln
+          vuln-type: os,library
           format: sarif
           output: reports/trivy-vuln.sarif
-          severity: CRITICAL,HIGH,MEDIUM
-          ignore-unfixed: true
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          limit-severities-for-sarif: true
+          ignore-unfixed: false
           exit-code: "0"
           # To enforce blocking on high/critical later, remove exit-code and rely on Trivy defaults.
 
@@ -117,10 +119,13 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          scanners: config
+          scanners: config,misconfig
+          vuln-type: os,library
           format: sarif
           output: reports/trivy-config.sarif
-          severity: CRITICAL,HIGH,MEDIUM
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          limit-severities-for-sarif: true
+          ignore-unfixed: false
           exit-code: "0"
 
       # ── Scan 3: Secrets (hard-coded credentials, tokens, etc.) ───────────────────
@@ -129,9 +134,12 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          scanners: secret
+          scanners: secret,license
+          vuln-type: os,library
           format: sarif
           output: reports/trivy-secret.sarif
+          limit-severities-for-sarif: true
+          ignore-unfixed: false
           exit-code: "0"
 
       # Keep an auditable copy of all results with explicit retention
