@@ -122,14 +122,14 @@ jobs:
         with:
           comment-summary-in-pr: always     # requires pull-requests: write
           # Enforcement knobs (uncomment to gate merges):
-          # fail-on-severity: low      # block if any vuln >= low
-          # fail-on-cvss: 7                 # or gate by CVSS score
+          fail-on-severity: low      # block if any vuln >= low
+          # fail-on-cvss: 5                 # or gate by CVSS score
           # deny-licenses: GPL-1.0-or-later, LGPL-2.0-or-later
           # allow-licenses: MIT, Apache-2.0, BSD-3-Clause
           # allow-ghsas: GHSA-xxxx-...,GHSA-yyyy-...   # fine-grained allowlist
           # deny-ghsas:  GHSA-zzzz-...                 # fine-grained denylist
-          # retry-on-snapshot-warnings: true           # Maven snapshots
-          # retry-on-snapshot-warnings-timeout: 180
+          retry-on-snapshot-warnings: true           # Maven snapshots
+          retry-on-snapshot-warnings-timeout: 180
 
           # ---------------- Warning-only posture; still show rich signals ----------------
           fail-on-scopes: runtime,development,unknown  # include dev/test deps in analysis (no fail unless gates above are enabled)
@@ -204,12 +204,12 @@ jobs:
           head-ref: ${{ steps.base.outputs.head }}
           comment-summary-in-pr: never      # not a PR; no comment
           # Enforcement knobs (uncomment to gate merges/commits in the future):
-          # fail-on-severity: low            # block on any known vuln
-          # fail-on-cvss: 7                  # or gate by CVSS score
+          fail-on-severity: low            # block on any known vuln
+          # fail-on-cvss: 5                  # or gate by CVSS score
           # deny-licenses: GPL-1.0-or-later, LGPL-2.0-or-later
           # allow-licenses: MIT, Apache-2.0, BSD-3-Clause
-          # retry-on-snapshot-warnings: true
-          # retry-on-snapshot-warnings-timeout: 180
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 180
 
           # ---------------- Warning-only posture; still show rich signals ----------------
           fail-on-scopes: runtime,development,unknown  # include dev/test deps in analysis (no fail unless gates above are enabled)
