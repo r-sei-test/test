@@ -119,7 +119,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          scanners: config,misconfig
+          scanners: config
           vuln-type: os,library
           format: sarif
           output: reports/trivy-config.sarif
@@ -149,6 +149,14 @@ jobs:
           name: trivy-sarif
           path: reports/*.sarif
           retention-days: 14
+
+      - name: Trivy DB + debug
+        shell: bash
+        run: |
+          for f in reports/*.sarif; do
+            echo "Results in $f: $(jq '.runs[0].results | length' "$f" 2>/dev/null || echo 'n/a')"
+          done
+
 
   # ─────────────────────────── Job 2: Upload (least-privilege) ───────────────────────────
   upload-sarif:
