@@ -94,12 +94,12 @@ jobs:
           fetch-depth: 1
 
       # Generate an SPDX 2.2 JSON SBOM. We run Syft via a pinned container digest
-      # to avoid curl|sh and ensure reproducibility.
-      - name: Generate SPDX SBOM with Syft (pinned image)
-        uses: docker://anchore/syft:v1.31.0@sha256:45fd6fc69b0eb8adf4688ec4ab1bfd31bf26d9841df960d252b6af003f8fad42
+      # to ensure reproducibility.
+      - name: Generate SPDX SBOM with Syft (pinned multi-arch index)
+        uses: docker://anchore/syft:v1.31.0@sha256:c15fa8af4c25edd72c0daf026d095fe51adbcfc7ad5d79a66e93d88f249e5abb
         with:
           args: >
-            syft dir:. -o spdx-json@2.2=${{ env.OUT_DIR }}/${{ env.SBOM_FILE }}
+            dir:. -o spdx-json@2.2=${{ env.OUT_DIR }}/${{ env.SBOM_FILE }}
 
       # Save the SBOM as an artifact for downstream jobs and debugging.
       - name: Upload SBOM artifact
@@ -111,8 +111,6 @@ jobs:
           if-no-files-found: error
 
   # Submits the SBOM to the Dependency Graph so Dependabot/GHAS can reason on it.
-  # This requires repository *write* and OIDC id-token *write*. Fork PRs typically
-  # lack these rights; we skip on forked PRs to avoid failures.
   submit-dependency-graph:
     name: Submit SBOM to Dependency Graph
     needs: sbom
@@ -173,9 +171,8 @@ jobs:
           path: ${{ env.IN_DIR }}
 
       # Run Grype from an immutable container image (tag + digest).
-      # Keep literal string in `uses:`; do not use `${{ env.* }}` here.
-      - name: Scan SBOM with Grype (pinned image) -> text + SARIF
-        uses: docker://anchore/grype:v0.99.1-nonroot-amd64@sha256:c68f0a866f7f6aa4631310dc86eda68be976bcf20b5cda806a0cd9aad5abfe74
+      - name: Scan SBOM with Grype (pinned multi-arch index) -> text + SARIF
+        uses: docker://anchore/grype:v0.99.1@sha256:aeaded256cc61f162774b1c0e19f44e1787d0ae7cdc8e8917e9ea2528375090e
         with:
           args: >
             /bin/sh -c "
