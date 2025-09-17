@@ -145,24 +145,35 @@ jobs:
           go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.0.3
           osv-scanner --version
 
-      - name: Generate SBOM (CycloneDX) with Syft
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $HOME/.local/bin v1.17.0
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          syft . -o cyclonedx-json=sbom.cdx.json
+      # Consider generating an SBOM artifact that can be scanned for issues
+      # - name: Generate SBOM (CycloneDX) with Syft
+      #  run: |
+      #    curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $HOME/.local/bin v1.17.0
+      #    echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      #    syft . -o cyclonedx-json=sbom.cdx.json
 
       # Run the scan:
+      #   - `scan -r .` recursively searches for supported lockfiles/SBOMs.
+      #   - `--allow-no-lockfiles` converts “no manifests found” into success (exit 0).
+      #     Remove this once your repo always has manifests; or replace with explicit `-L` flags.
       #   - `continue-on-error: true` ensures we still publish SARIF if vulnerabilities are found.
-      - name: Run OSV-Scanner → SARIF + JSON
+      #   - Dual output: SARIF (for GitHub UI) + JSON (for experimental_generic_findings).      - name: Run OSV-Scanner -> SARIF + JSON
         continue-on-error: true
         shell: bash
         env:
           SARIF_OUT: osv.sarif
           JSON_OUT:  osv.json
         run: |
+          osv-scanner scan -r . \
+            --allow-no-lockfiles \
+          #  --call-analysis=all \ # Will not work for all versions of osv-scanner
+          #  --experimental-plugins lockfile,sbom,directory,artifact,govulncheck,weakcreds,cis \ # Will not work for all versions of osv-scanner
+            --format sarif --output "${SARIF_OUT}" \
+            --format json  --output "${JSON_OUT}"
 
-          osv-scanner --sbom sbom.cdx.json --format sarif --output "$SARIF_OUT" || true
-          osv-scanner --sbom sbom.cdx.json --format json --output "$JSON_OUT" || true
+          #  Scan the SBOM
+          #  osv-scanner --sbom sbom.cdx.json --format sarif --output "$SARIF_OUT" || true
+          #  osv-scanner --sbom sbom.cdx.json --format json --output "$JSON_OUT" || true
 
           # Ensure files exist even if empty (so uploaders don’t fail)
           [[ -s "$SARIF_OUT" ]] || cat > "$SARIF_OUT" <<'JSON'
