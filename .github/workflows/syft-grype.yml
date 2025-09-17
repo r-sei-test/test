@@ -170,15 +170,21 @@ jobs:
           name: sbom.spdx.json
           path: ${{ env.IN_DIR }}
 
-      # Run Grype from an immutable container image (tag + digest).
-      - name: Scan SBOM with Grype (pinned multi-arch index) -> text + SARIF
-        uses: docker://anchore/grype:v0.99.1@sha256:aeaded256cc61f162774b1c0e19f44e1787d0ae7cdc8e8917e9ea2528375090e
-        with:
-          args: >
-            /bin/sh -c "
-              grype sbom:${{ env.IN_DIR }}/${{ env.SBOM_FILE }} -o table > ${{ env.TXT_OUT }} || true;
-              grype sbom:${{ env.IN_DIR }}/${{ env.SBOM_FILE }} -o sarif > ${{ env.SARIF_OUT }} || true
-            "
+      # Run Grype from container image (tag + digest).
+      - name: Scan SBOM with Grype (pinned multi-arch) → text + SARIF
+        run: |
+          set -Eeuo pipefail
+          IMG="anchore/grype:v0.99.1@sha256:aeaded256cc61f162774b1c0e19f44e1787d0ae7cdc8e8917e9ea2528375090e"
+          # Pull explicitly so the digest is resolved once and cached
+          docker pull "$IMG" >/dev/null
+
+          # Human-readable table report (advisory; never fail CI on findings)
+          docker run --rm -v "$PWD:/work" -w /work "$IMG" \
+            sbom:${IN_DIR}/${SBOM_FILE} -o table > "${TXT_OUT}" || true
+
+          # SARIF for Code Scanning
+          docker run --rm -v "$PWD:/work" -w /work "$IMG" \
+            sbom:${IN_DIR}/${SBOM_FILE} -o sarif > "${SARIF_OUT}" || true
 
       - name: Upload Grype reports (artifact, pinned)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
