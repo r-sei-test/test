@@ -158,8 +158,8 @@ jobs:
       #     Remove this once your repo always has manifests; or replace with explicit `-L` flags.
       #   - `continue-on-error: true` ensures we still publish SARIF if vulnerabilities are found.
       #   - Dual output: SARIF (for GitHub UI) + JSON (for experimental_generic_findings).      - name: Run OSV-Scanner -> SARIF + JSON
+      - name: Run OSV-Scanner -> SARIF + JSON
         continue-on-error: true
-        shell: bash
         env:
           SARIF_OUT: osv.sarif
           JSON_OUT:  osv.json
