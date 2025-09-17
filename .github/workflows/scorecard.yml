@@ -62,9 +62,14 @@ jobs:
     # Least privilege here:
     # - contents: read -> checkout
     # - id-token: write -> required if `publish_results: true` on default branch (public repos)
+    # - actions: read -> lets Scorecard evaluate CI-Tests check
+    # - pull-requests: read -> improves Code-Review related checks
+
     permissions:
       contents: read
       id-token: write
+      actions: read           # extra permission to let CI-Tests run
+      pull-requests: read     # extra permission for Code-Review checks
 
     # This job must contain only `uses:` steps (no `run:`) to pass Scorecard’s workflow verification
     steps:
@@ -76,6 +81,9 @@ jobs:
       #     uploads.github.com:443
       #     objects.githubusercontent.com:443
       #     github.com:443
+      #     api.securityscorecards.dev:443     # required for publishing results to OpenSSF
+      #     storage.googleapis.com:443          # for Google-hosted artifacts
+
       - name: Harden runner (egress audit)
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
         with:
@@ -86,7 +94,9 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-          fetch-depth: 0                  # Some checks benefit from history 
+          fetch-depth: 0                  # Some checks benefit from history (e.g., Maintained)
+          submodules: recursive           # ensures submodules are scanned (Binary-Artifacts, etc.)
+          lfs: true                       # ensures LFS files are visible to Scorecard
 
       # Run Scorecard and write SARIF. Publishing to OpenSSF works only on the default
       # branch and for public repos.
