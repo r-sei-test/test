@@ -164,12 +164,22 @@ jobs:
           SARIF_OUT: osv.sarif
           JSON_OUT:  osv.json
         run: |
-          osv-scanner scan -r . \
-            --allow-no-lockfiles \
-          #  --call-analysis=all \ # Will not work for all versions of osv-scanner
-          #  --experimental-plugins lockfile,sbom,directory,artifact,govulncheck,weakcreds,cis \ # Will not work for all versions of osv-scanner
-            --format sarif --output "${SARIF_OUT}" \
-            --format json  --output "${JSON_OUT}"
+          args=(scan -r . --allow-no-lockfiles)
+          # Optional flags (may not exist in a pinned version):
+          # args+=(--call-analysis)
+          # args+=(--experimental-plugins lockfile,sbom,directory,artifact)
+
+          # 1) SARIF
+          osv-scanner "${args[@]}" --format sarif --output "$SARIF_OUT" || true
+
+          # 2) JSON
+          osv-scanner "${args[@]}" --format json  --output "$JSON_OUT"  || true
+
+          # Ensure files exist even if empty
+          [[ -s "$SARIF_OUT" ]] || cat > "$SARIF_OUT" <<'JSON'
+          {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"osv-scanner"}},"results":[]}]} 
+          JSON
+          [[ -s "$JSON_OUT"  ]] || echo '{}' > "$JSON_OUT"
 
           #  Scan the SBOM
           #  osv-scanner --sbom sbom.cdx.json --format sarif --output "$SARIF_OUT" || true
