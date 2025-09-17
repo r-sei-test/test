@@ -157,12 +157,12 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          SARIF_OUT: osv.cdx.sarif
-          JSON_OUT:  osv.cdx.json
+          SARIF_OUT: osv.sarif
+          JSON_OUT:  osv.json
         run: |
 
-          osv-scanner --sbom sbom.json --format sarif --output "$SARIF_OUT" || true
-          osv-scanner --sbom sbom.json --format json --output "$JSON_OUT" || true
+          osv-scanner --sbom sbom.cdx.json --format sarif --output "$SARIF_OUT" || true
+          osv-scanner --sbom sbom.cdx.json --format json --output "$JSON_OUT" || true
 
           # Ensure files exist even if empty (so uploaders don’t fail)
           [[ -s "$SARIF_OUT" ]] || cat > "$SARIF_OUT" <<'JSON'
