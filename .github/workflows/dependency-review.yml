@@ -84,6 +84,7 @@ concurrency:
 permissions:
   contents: read
 
+jobs:
   # ---------------- PR job: comments allowed (needs pull-requests: write) ----------------
   dependency-review-pr:
     if: ${{ github.event_name == 'pull_request' }}
