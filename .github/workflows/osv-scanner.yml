@@ -149,7 +149,7 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $HOME/.local/bin v1.17.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          syft . -o cyclonedx-json=sbom.json
+          syft . -o cyclonedx-json=sbom.cdx.json
 
       # Run the scan:
       #   - `continue-on-error: true` ensures we still publish SARIF if vulnerabilities are found.
@@ -157,25 +157,14 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          SARIF_OUT: osv.sarif
-          JSON_OUT:  osv.json
+          SARIF_OUT: osv.cdx.sarif
+          JSON_OUT:  osv.cdx.json
         run: |
-          # Prefer the v2 syntax; falls back to --sbom if needed
-          if osv-scanner scan -L sbom.json --format sarif --output "$SARIF_OUT" 2>/dev/null; then
-            :
-          else
-            # Older CLI variant
-            osv-scanner --sbom sbom.json --format sarif --output "$SARIF_OUT" || true
-          fi
 
-          # Optional JSON alongside SARIF
-          if osv-scanner scan -L sbom.json --format json --output "$JSON_OUT" 2>/dev/null; then
-            :
-          else
-            osv-scanner --sbom sbom.json --format json --output "$JSON_OUT" || true
-          fi
+          osv-scanner --sbom sbom.json --format sarif --output "$SARIF_OUT" || true
+          osv-scanner --sbom sbom.json --format json --output "$JSON_OUT" || true
 
-          Ensure files exist even if empty (so uploaders don’t fail)
+          # Ensure files exist even if empty (so uploaders don’t fail)
           [[ -s "$SARIF_OUT" ]] || cat > "$SARIF_OUT" <<'JSON'
           {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"osv-scanner"}},"results":[]}]} 
           JSON
