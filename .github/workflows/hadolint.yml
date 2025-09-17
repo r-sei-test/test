@@ -74,12 +74,21 @@ jobs:
       # Install hadolint deterministically (no curl|sh to unknown script)
       - name: Install hadolint (pinned + checksum verify)
         run: |
-          curl -fsSL -o "$HADOLINT_BIN" \
-            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/${HADOLINT_BIN}"
-          curl -fsSL -o SHA256SUMS \
-            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/SHA256SUMS"
-          grep " ${HADOLINT_BIN}$" SHA256SUMS | sha256sum -c -
-          install -m 0755 "$HADOLINT_BIN" /usr/local/bin/hadolint
+          set -Eeuo pipefail
+          case "$(uname -m)" in
+            x86_64)  BIN="hadolint-Linux-x86_64" ;;
+            aarch64) BIN="hadolint-Linux-arm64" ;;
+            *) echo "Unsupported arch: $(uname -m)"; exit 1 ;;
+          esac
+
+          VER="v2.13.1"  # keep this in one place when you bump
+          curl -fsSL -o "${BIN}" \
+            "https://github.com/hadolint/hadolint/releases/download/${VER}/${BIN}"
+          curl -fsSL -o "${BIN}.sha256" \
+            "https://github.com/hadolint/hadolint/releases/download/${VER}/${BIN}.sha256"
+
+          sha256sum -c "${BIN}.sha256"
+          install -m 0755 "${BIN}" /usr/local/bin/hadolint
 
       # Use git to enumerate tracked Dockerfiles (avoids 'find' traversing submodules or denied paths)
       - name: Discover Dockerfiles
