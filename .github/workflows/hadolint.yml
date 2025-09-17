@@ -1,0 +1,170 @@
+# ------------------------------------------------------------------------------
+# Workflow: Hadolint
+# Purpose : Lint all Dockerfiles with hadolint, publish text + SARIF reports,
+#           and upload SARIF to GitHub Code Scanning on every run
+# ------------------------------------------------------------------------------
+
+name: Hadolint
+
+on:
+  push:
+    paths:
+      - '**/Dockerfile'
+      - '**/Dockerfile.*'
+      - '.hadolint.yaml'
+      - '.hadolint.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '**/Dockerfile'
+      - '**/Dockerfile.*'
+      - '.hadolint.yaml'
+      - '.hadolint.yml'
+  workflow_dispatch:
+
+# Default deny: read-only at top level
+permissions:
+  contents: read
+
+# Cancel older runs on same ref to save minutes 
+concurrency:
+  group: hadolint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Safe shell defaults for all run steps
+defaults:
+  run:
+    shell: bash -Eeuo pipefail {0}
+
+jobs:
+  lint:
+    name: Lint Dockerfiles and package reports
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    # Only needs read access
+    permissions:
+      contents: read
+
+    # Expose whether we produced a SARIF so the upload job can decide to run
+    outputs:
+      sarif_exists: ${{ steps.scan.outputs.sarif_exists }}
+
+    env:
+      REPORT_DIR: hadolint-reports
+      # Pinned hadolint version (adjust as needed)
+      HADOLINT_VERSION: v2.13.1
+      HADOLINT_BIN: hadolint-Linux-x86_64
+
+    steps:
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository (pinned)
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Ensure report directory exists
+        run: mkdir -p "$REPORT_DIR"
+
+      # Install hadolint 
+      - name: Install hadolint 
+        run: |
+          set -Eeuo pipefail
+          VER="v2.13.1"
+          case "$(uname -m)" in
+            x86_64)  URL="https://github.com/hadolint/hadolint/releases/download/${VER}/hadolint-Linux-x86_64" ;;
+            aarch64) URL="https://github.com/hadolint/hadolint/releases/download/${VER}/hadolint-Linux-arm64" ;;
+            *) echo "Unsupported arch: $(uname -m)"; exit 1 ;;
+          esac
+
+          curl -fsSL "$URL" -o /usr/local/bin/hadolint
+          chmod 0755 /usr/local/bin/hadolint
+          hadolint --version
+
+      # Use git to enumerate tracked Dockerfiles (avoids 'find' traversing submodules or denied paths)
+      - name: Discover Dockerfiles
+        id: discover
+        run: |
+          mapfile -d '' FILES < <(git ls-files -z -- '**/Dockerfile' '**/Dockerfile.*')
+          printf 'count=%d\n' "${#FILES[@]}"
+          echo "count=${#FILES[@]}" >> "$GITHUB_OUTPUT"
+          # Stash list to a file for reuse
+          printf '%s\0' "${FILES[@]}" > "$REPORT_DIR/files.zlist" || true
+
+      # Run hadolint twice (TTY + SARIF). Never fail CI because of lint findings.
+      # Also handle the empty-repo case by creating empty placeholder files.
+      - name: Run hadolint and generate reports (text + SARIF)
+        id: scan
+        run: |
+          if [[ "${{ steps.discover.outputs.count }}" == "0" ]]; then
+            echo "No Dockerfiles found; creating empty reports."
+            : > "${REPORT_DIR}/hadolint-report.txt"
+            : > "${REPORT_DIR}/hadolint-report.sarif"
+            echo "sarif_exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Re-load file list
+          mapfile -d '' FILES < "$REPORT_DIR/files.zlist"
+
+          # Generate human-readable text report (do not pipe; avoid pipefail surprises)
+          hadolint --failure-threshold error -f tty "${FILES[@]}" > "${REPORT_DIR}/hadolint-report.txt" || true
+
+          # Generate SARIF; keep non-zero exit from hadolint non-fatal
+          hadolint --failure-threshold error -f sarif "${FILES[@]}" > "${REPORT_DIR}/hadolint-report.sarif" || true
+
+          # Flag whether SARIF has content
+          if [[ -s "${REPORT_DIR}/hadolint-report.sarif" ]]; then
+            echo "sarif_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sarif_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Always attempt artifact upload; if empty, this will gracefully warn but still create the artifact container.
+      - name: Upload reports artifact (pinned)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hadolint-reports
+          path: ${{ env.REPORT_DIR }}/
+          retention-days: 14
+          if-no-files-found: warn
+
+  upload-sarif:
+    name: Upload SARIF to GitHub Code Scanning
+    needs: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    # Only run if lint job completed successfully and produced SARIF
+    if: ${{ needs.lint.result == 'success' && needs.lint.outputs.sarif_exists == 'true' }}
+
+    # Minimal rights to upload SARIF; add actions: read for private repos
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+
+    steps:
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Download reports artifact (pinned)
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: hadolint-reports
+          path: hadolint-reports
+
+      - name: Upload Hadolint SARIF to Security Dashboard (pinned)
+        if: ${{ hashFiles('hadolint-reports/hadolint-report.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        with:
+          sarif_file: hadolint-reports/hadolint-report.sarif
+          category: hadolint

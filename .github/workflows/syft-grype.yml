@@ -1,0 +1,203 @@
+# ------------------------------------------------------------------------------
+# Workflow: Syft/Grype (SBOM)
+# Purpose : Generate an SPDX SBOM with Syft, submit it to GitHub Dependency Graph,
+#           scan the SBOM with Grype, and upload SARIF to Code Scanning.
+# ------------------------------------------------------------------------------
+
+name: Syft/Grype (SBOM)
+
+on:
+  # Run on pushes/PRs. Narrow to common dependency manifest paths to reduce noise.
+  push:
+    paths:
+      - '**/Dockerfile*'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - '**/yarn.lock'
+      - '**/requirements*.txt'
+      - '**/pyproject.toml'
+      - '**/poetry.lock'
+      - '**/go.mod'
+      - '**/go.sum'
+      - '**/pom.xml'
+      - '**/gradle*.kts'
+      - '**/build.gradle'
+      - '**/build.gradle.kts'
+      - '.syft.yaml'
+      - '.grype.yaml'
+  pull_request:
+    paths:
+      - '**/Dockerfile*'
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/pnpm-lock.yaml'
+      - '**/yarn.lock'
+      - '**/requirements*.txt'
+      - '**/pyproject.toml'
+      - '**/poetry.lock'
+      - '**/go.mod'
+      - '**/go.sum'
+      - '**/pom.xml'
+      - '**/gradle*.kts'
+      - '**/build.gradle'
+      - '**/build.gradle.kts'
+      - '.syft.yaml'
+      - '.grype.yaml'
+  # Allow manual runs for debugging or backfills.
+  workflow_dispatch:
+
+# Default to least privilege. Grant job-level writes only where needed.
+permissions:
+  contents: read
+
+# Cancel redundant runs on the same ref to save time and cost.
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: true
+
+# Safe shell defaults for all run steps.
+defaults:
+  run:
+    shell: bash -Eeuo pipefail {0}
+
+jobs:
+  sbom:
+    name: Generate SBOM (Syft) and publish artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    # SBOM generation only reads the repo.
+    permissions:
+      contents: read
+
+    env:
+      # Centralize versions/digests so updates are easy and auditable.
+      # Syft: tag + immutable manifest digest (v1.31.0).
+      SYFT_IMAGE: anchore/syft:v1.31.0@sha256:45fd6fc69b0eb8adf4688ec4ab1bfd31bf26d9841df960d252b6af003f8fad42
+      OUT_DIR: sbom
+      SBOM_FILE: sbom.spdx.json
+
+    steps:
+      # Harden the ephemeral runner. Start in "audit" to learn required egress.
+      # Later, switch to egress-policy: block and add an allowlist.
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      # Pin checkout to a full commit SHA for immutability.
+      - name: Checkout repository
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      # Generate an SPDX 2.2 JSON SBOM. We run Syft via a pinned container digest
+      # to ensure reproducibility.
+      - name: Generate SPDX SBOM with Syft (pinned multi-arch index)
+        uses: docker://anchore/syft:v1.31.0@sha256:c15fa8af4c25edd72c0daf026d095fe51adbcfc7ad5d79a66e93d88f249e5abb
+        with:
+          args: >
+            dir:. -o spdx-json@2.2=${{ env.OUT_DIR }}/${{ env.SBOM_FILE }}
+
+      # Save the SBOM as an artifact for downstream jobs and debugging.
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ env.SBOM_FILE }}
+          path: ${{ env.OUT_DIR }}/${{ env.SBOM_FILE }}
+          retention-days: 7
+          if-no-files-found: error
+
+  # Submits the SBOM to the Dependency Graph so Dependabot/GHAS can reason on it.
+  submit-dependency-graph:
+    name: Submit SBOM to Dependency Graph
+    needs: sbom
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: >
+      github.event_name != 'pull_request'
+      || (github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork)
+
+    permissions:
+      contents: write   # required by submission API
+      id-token: write   # action uses OIDC
+    steps:
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sbom.spdx.json
+          path: sbom
+
+      # Pin the submission action to the exact commit for v0.1.1
+      - name: Upload SBOM to Dependency Graph
+        uses: advanced-security/spdx-dependency-submission-action@5530bab9ee4bbe66420ce8280624036c77f89746 # v0.1.1
+        with:
+          filePath: sbom/
+
+  scan:
+    name: Scan SBOM with Grype and upload SARIF
+    needs: sbom
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: always()
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+
+    env:
+      IN_DIR: sbom
+      SBOM_FILE: sbom.spdx.json
+      SARIF_OUT: grype-results.sarif
+      TXT_OUT: grype-report.txt
+
+    steps:
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Download SBOM artifact (pinned)
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sbom.spdx.json
+          path: ${{ env.IN_DIR }}
+
+      # Run Grype from container image (tag + digest).
+      - name: Scan SBOM with Grype (pinned multi-arch) → text + SARIF
+        run: |
+          set -Eeuo pipefail
+          IMG="anchore/grype:v0.99.1@sha256:aeaded256cc61f162774b1c0e19f44e1787d0ae7cdc8e8917e9ea2528375090e"
+          # Pull explicitly so the digest is resolved once and cached
+          docker pull "$IMG" >/dev/null
+
+          # Human-readable table report (advisory; never fail CI on findings)
+          docker run --rm -v "$PWD:/work" -w /work "$IMG" \
+            sbom:${IN_DIR}/${SBOM_FILE} -o table > "${TXT_OUT}" || true
+
+          # SARIF for Code Scanning
+          docker run --rm -v "$PWD:/work" -w /work "$IMG" \
+            sbom:${IN_DIR}/${SBOM_FILE} -o sarif > "${SARIF_OUT}" || true
+
+      - name: Upload Grype reports (artifact, pinned)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: grype-sbom-reports
+          path: |
+            ${{ env.TXT_OUT }}
+            ${{ env.SARIF_OUT }}
+          retention-days: 7
+
+      - name: Upload SARIF to GitHub Code Scanning (pinned)
+        if: hashFiles(env.SARIF_OUT) != ''
+        uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        with:
+          sarif_file: ${{ env.SARIF_OUT }}
+          category: grype

@@ -85,12 +85,6 @@ permissions:
   contents: read
 
 jobs:
-  - name: Generate SBOM (CycloneDX) with Syft
-    run: |
-      curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $HOME/.local/bin v1.17.0
-      echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      syft . -o cyclonedx-json=sbom.json
-
   # ---------------- PR job: comments allowed (needs pull-requests: write) ----------------
   dependency-review-pr:
     if: ${{ github.event_name == 'pull_request' }}
