@@ -148,17 +148,53 @@ jobs:
     needs: sbom
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    # Always attempt to upload SARIF (even on fork PRs). If repository settings
-    # restrict uploads from forks, GitHub will block it; logs will show details.
     if: always()
-
-    # Minimum rights to upload SARIF. Add actions:read for private repos to avoid
-    # "Resource not accessible by integration" in some configurations.
     permissions:
       contents: read
       actions: read
       security-events: write
 
     env:
-      # Grype: tag + immutable digest (v0.99.1, nonroot variant for safety).
-      GRYPE_IMAGE: anchore/grype:v0.99.1-nonroot-amd64@sha256:c68f0a866_
+      IN_DIR: sbom
+      SBOM_FILE: sbom.spdx.json
+      SARIF_OUT: grype-results.sarif
+      TXT_OUT: grype-report.txt
+
+    steps:
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      - name: Download SBOM artifact (pinned)
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sbom.spdx.json
+          path: ${{ env.IN_DIR }}
+
+      # Run Grype from an immutable container image (tag + digest).
+      # Keep literal string in `uses:`; do not use `${{ env.* }}` here.
+      - name: Scan SBOM with Grype (pinned image) -> text + SARIF
+        uses: docker://anchore/grype:v0.99.1-nonroot-amd64@sha256:c68f0a866f7f6aa4631310dc86eda68be976bcf20b5cda806a0cd9aad5abfe74
+        with:
+          args: >
+            /bin/sh -c "
+              grype sbom:${{ env.IN_DIR }}/${{ env.SBOM_FILE }} -o table > ${{ env.TXT_OUT }} || true;
+              grype sbom:${{ env.IN_DIR }}/${{ env.SBOM_FILE }} -o sarif > ${{ env.SARIF_OUT }} || true
+            "
+
+      - name: Upload Grype reports (artifact, pinned)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: grype-sbom-reports
+          path: |
+            ${{ env.TXT_OUT }}
+            ${{ env.SARIF_OUT }}
+          retention-days: 7
+
+      - name: Upload SARIF to GitHub Code Scanning (pinned)
+        if: hashFiles(env.SARIF_OUT) != ''
+        uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        with:
+          sarif_file: ${{ env.SARIF_OUT }}
+          category: grype
