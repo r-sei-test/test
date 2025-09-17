@@ -96,7 +96,7 @@ jobs:
       # Generate an SPDX 2.2 JSON SBOM. We run Syft via a pinned container digest
       # to avoid curl|sh and ensure reproducibility.
       - name: Generate SPDX SBOM with Syft (pinned image)
-        uses: docker://${{ env.SYFT_IMAGE }}
+        uses: docker://anchore/syft:v1.31.0@sha256:45fd6fc69b0eb8adf4688ec4ab1bfd31bf26d9841df960d252b6af003f8fad42
         with:
           args: >
             syft dir:. -o spdx-json@2.2=${{ env.OUT_DIR }}/${{ env.SBOM_FILE }}
