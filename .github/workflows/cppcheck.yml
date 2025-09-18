@@ -1,0 +1,301 @@
+# Cppcheck (native SARIF; built from pinned upstream) — PRs, pushes, manual, weekly
+# =============================================================================
+# PURPOSE (read this first)
+# -----------------------------------------------------------------------------
+# Cppcheck is a static analysis tool for C/C++ that finds bugs and risky patterns.
+# This workflow:
+#   • Builds a pinned Cppcheck release from source
+#   • Runs Cppcheck on your repository and writes a SARIF report (with CWE where available)
+#   • Uploads the SARIF to GitHub’s Code Scanning (Security tab)
+#
+# WHY THIS LAYOUT (security + reliability best practices)
+# -----------------------------------------------------------------------------
+#   • Default-deny permissions at the workflow level (read-only by default)
+#   • Only the uploader job gets permission to write security events
+#   • Every third-party action is pinned to a specific commit SHA (no “latest”)
+#   • Concurrency cancels older superseded runs (fewer pile-ups on busy PRs)
+#   • Timeouts cap spend and prevent hours-long hangs
+#   • Egress hardening audits outbound network calls (later: block + allowlist)
+#   • Checkout without persisted credentials (we never push here)
+#
+# HOW TO READ THIS FILE
+# -----------------------------------------------------------------------------
+# You’ll see notes sprinkled throughout. They define each block,
+# explain why it exists, and suggest safe tweaks.
+
+name: Cppcheck (native SARIF)
+
+on:
+  # Run on PRs so reviewers see issues before merge.
+  pull_request:
+    branches: [ "main" ]                       #  note: adjust to your default branch
+    paths:
+      - "**/*"                                 #  note: narrow for speed (e.g., "src/**", "lib/**")
+      - ".github/workflows/cppcheck.yml"       # Re-run when this workflow changes
+
+  # Also run on pushes to main (covers direct commits / fast-forwards).
+  push:
+    branches: [ "main" ]
+    paths:
+      - "**/*"
+      - ".github/workflows/cppcheck.yml"
+
+  # Button in the Actions tab for ad-hoc/manual runs.
+  workflow_dispatch: {}
+
+  # Optional weekly run to catch drift. Adjust cadence to taste.
+  schedule:
+    - cron: "42 23 * * 2"                      # Tuesdays 23:42 UTC
+
+# Cancel older in-flight runs for the same PR/ref (prevents CI pile-ups).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+# Default-deny at the workflow level. Jobs will elevate minimally.
+permissions:
+  contents: read
+
+jobs:
+  # ────────────────────────────────── Job 1: Build & Scan (read-only) ──────────────────────────────────
+  cppcheck-scan:
+    name: Build pinned Cppcheck → scan → SARIF
+    runs-on: ubuntu-24.04                      #  note: fixed runner → repeatable builds
+    timeout-minutes: 30                        #  note: cap total time (build + scan)
+    permissions:
+      contents: read                           #  note: only needs to read code in this job
+
+    env:
+      # Pin upstream Cppcheck to an immutable commit for 2.18.3:
+      CPPCHECK_REF: f726f98ed2c3277780ee133ec5338f6352d7b43b  # tag 2.18.3
+      # Optional: set CPPCHECK_MAX_CONFIGS to override default ifdef cap below.
+      # Examples:
+      #   CPPCHECK_MAX_CONFIGS: "--max-configs=512"   # increase exploration
+      #   CPPCHECK_MAX_CONFIGS: ""                    # disable explicit cap (keeps --force only)
+      # Update the commit when bumping versions; keep a changelog entry.
+
+    steps:
+      # Harden outbound network. Start with "audit" to see what calls happen.
+      # After several clean runs, flip to:
+      #   egress-policy: block
+      #   allowed-endpoints: >
+      #     api.github.com:443
+      #     objects.githubusercontent.com:443
+      #     github.com:443
+      #     uploads.github.com:443
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      # Check out your repository at this commit. We disable persisted credentials
+      # because this workflow never pushes back to the repo (least privilege).
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Install toolchain + deps required to build Cppcheck CLI.
+      - name: Install build dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git pkg-config \
+            libpcre3-dev python3
+
+      # Fetch Cppcheck source pinned to the exact commit for 2.18.3 (native SARIF is 2.16+).
+      # CHANGE: build the tool OUTSIDE this repository to avoid scanning its sources.
+      - name: Fetch Cppcheck (pinned commit, shallow)
+        run: |
+          set -euxo pipefail
+          SRC="$RUNNER_TEMP/cppcheck-src"
+          mkdir -p "$SRC"
+          git init "$SRC"
+          cd "$SRC"
+          git remote add origin https://github.com/danmar/cppcheck.git
+          # Fetch only the single commit we need (2.18.3 tag commit), no tags/branches
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "${CPPCHECK_REF}"
+          git checkout --detach FETCH_HEAD
+          git rev-parse HEAD
+
+      # Build a release binary. MATCHCOMPILER improves performance; HAVE_RULES enables rules.
+      # CHANGE: build in $RUNNER_TEMP (not inside the repo).
+      - name: Build Cppcheck
+        working-directory: ${{ runner.temp }}/cppcheck-src
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DHAVE_RULES=ON -DUSE_MATCHCOMPILER=ON
+          cmake --build build --config Release -j"$(nproc)"
+          echo "$PWD/build/bin" >> $GITHUB_PATH
+
+      # Run Cppcheck with native SARIF output.
+      # Notes:
+      #   • --output-format=sarif is supported since 2.16.0
+      #   • Tune --enable/--inconclusive/--std/--platform/--library/--project as needed
+      #   • Add suppressions or path filters to cut noise (see commented examples)
+      # CHANGE: run the analyzer IN THIS REPOSITORY and pass an explicit file list.
+      #         If no C/C++ files are found, emit an EMPTY SARIF so upload always succeeds.
+      - name: Run Cppcheck (native SARIF)
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cppcheck --version
+
+          # Discover tracked C/C++ files (fast; respects .gitignore)
+          git ls-files | grep -E '\.(c|cc|cp|cxx|cpp|c\+\+|h|hh|hp|hxx|hpp|h\+\+)$' > cppcheck-filelist.txt || true
+
+          # Include *untracked* C/C++ files in the repo tree (e.g., in fresh branches / generated code).
+          # Only exclude .git itself.
+          find . -type f \
+            \( -iname '*.c' -o -iname '*.cc' -o -iname '*.cp' -o -iname '*.cxx' -o -iname '*.cpp' -o -iname '*.c++' \
+               -o -iname '*.h' -o -iname '*.hh' -o -iname '*.hp' -o -iname '*.hxx' -o -iname '*.hpp' -o -iname '*.h++' \) \
+            -not -path './.git/*' \
+            >> cppcheck-filelist.txt
+
+          # De-duplicate and normalize the list; remove empty lines.
+          sort -u cppcheck-filelist.txt | sed '/^[[:space:]]*$/d' > cppcheck-filelist.clean
+          mv cppcheck-filelist.clean cppcheck-filelist.txt
+
+          # If still nothing to analyze, emit a minimal valid SARIF and exit cleanly.
+          if [ ! -s cppcheck-filelist.txt ]; then
+            echo "No C/C++ files found; creating empty SARIF so the job can upload cleanly."
+            ver="$(cppcheck --version | awk '{print $2}')"
+            printf '%s\n' \
+              '{' \
+              '  "version": "2.1.0",' \
+              '  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",' \
+              '  "runs": [' \
+              '    {' \
+              '      "tool": { "driver": { "name": "cppcheck", "version": "__VER__" } },' \
+              '      "results": []' \
+              '    }' \
+              '  ]' \
+              '}' \
+              > cppcheck-results.sarif
+            sed -i "s/__VER__/${ver}/" cppcheck-results.sarif
+            exit 0
+          fi
+
+          # Opportunistic project-aware mode
+          # If a compile_commands.json is already present, use it.
+          PROJECT_ARG=""
+          if [ -f compile_commands.json ]; then
+            PROJECT_ARG="--project=compile_commands.json"
+          else
+            # If the repo appears to be CMake-based, try to export compile_commands.json.
+            # This often increases findings by giving cppcheck real include paths/defines.
+            if [ -f CMakeLists.txt ]; then
+              echo "Detected CMake project; attempting to export compile_commands.json for better accuracy."
+              cmake -S . -B _cppcheck_build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null 2>&1 || true
+              if [ -f _cppcheck_build/compile_commands.json ]; then
+                PROJECT_ARG="--project=_cppcheck_build/compile_commands.json"
+              fi
+            fi
+          fi
+
+          # Run analysis on the discovered files (+ optional project database, if detected).
+          # NOTE: We do not pick a C/C++ standard here and we do not assume specific directories.
+
+          # Optional cap for ifdef-config exploration.
+          # Default: "--max-configs=256" for more coverage.
+          # To change: set CPPCHECK_MAX_CONFIGS in env above, e.g.:
+          #   CPPCHECK_MAX_CONFIGS: "--max-configs=512"
+          # To disable: set CPPCHECK_MAX_CONFIGS: ""
+          EXTRA_MAX_CONFIGS="--max-configs=256"
+          if [ -n "${CPPCHECK_MAX_CONFIGS:-}" ]; then
+            EXTRA_MAX_CONFIGS="${CPPCHECK_MAX_CONFIGS}"
+          fi
+
+          # IMPORTANT: --project CANNOT be combined with explicit files/--file-list.
+          # So: if PROJECT_ARG is set -> run project mode only; else -> run with file list.
+          if [ -n "${PROJECT_ARG}" ]; then
+            cppcheck \
+              --force \
+              ${EXTRA_MAX_CONFIGS:+$EXTRA_MAX_CONFIGS} \
+              --enable=all \
+              --inconclusive \
+              --inline-suppr \
+              --output-format=sarif \
+              --output-file=cppcheck-results.sarif \
+              ${PROJECT_ARG} \
+              2> cppcheck-stderr.log
+          else
+            cppcheck \
+              --force \
+              ${EXTRA_MAX_CONFIGS:+$EXTRA_MAX_CONFIGS} \
+              --enable=all \
+              --inconclusive \
+              --inline-suppr \
+              --output-format=sarif \
+              --output-file=cppcheck-results.sarif \
+              --file-list=cppcheck-filelist.txt \
+              2> cppcheck-stderr.log
+          fi
+
+          # Turn up "amount found" with added arguments to above:
+          # --enable=all  # includes error/warning/style/performance/portability/information categories (same severities see in XML/SARIF)
+          # --inconclusive  # Reports issues that cppcheck isn’t fully certain about (expect more false positives).
+          # --force  # Explore more paths; use CPPCHECK_MAX_CONFIGS (flag above) to further increase ifdef coverage
+          # --project=compile_commands.json   # Feed real build settings (include paths, macros, flags) using your compile_commands.json
+          # Match the actual platform and language standard (e.g., `--platform=unix64 --std=c++20`)
+          # Use addons when relevant, for extra rule sets (e.g., `--addon=misra.json --enable=style .`)
+          # Consider using Clang parser, to use Clang's AST as input before running cppcheck's analyses (experimental):
+          #                  `--clang --project=compile_commands.json`
+          # --cppcheck-build-dir=.cppcheck-cache --enable=all -j"$(nproc)" # Whole-program checks (e.g., `unusedFunction`)
+          #
+          # Tune scope (more relevant insights, less noise):
+          # `--file-filter` and `-i` focus analysis and can reveal issues hidden in large noisy
+          #
+          # Examples you can add:
+          #   --std=c++17 --language=c++ --platform=native
+          #   --file-filter=src/** --file-filter=include/**
+          #   --suppress=*:*third_party/* --suppress=*:*vendor/*
+
+      # Upload the SARIF so:
+      #   1) We keep an auditable copy with a retention policy
+      #   2) The next job can download and upload it to the Security tab
+      # "if: always()" ensures we capture results even if Cppcheck exits non-zero.
+      - name: Upload Cppcheck SARIF as artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cppcheck-sarif
+          path: cppcheck-results.sarif
+          retention-days: 14                   #  note: adjust to org policy
+
+  # ──────────────────────────────── Job 2: Upload (least privilege) ────────────────────────────────
+  upload-sarif:
+    name: Upload Cppcheck SARIF to Code Scanning
+    needs: cppcheck-scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Only this job can write security events (least privilege).
+    permissions:
+      contents: read
+      security-events: write
+      actions: read                            #  note: helpful in private repos for status; safe to keep
+
+    steps:
+      # Harden outbound network here too (mirrors the first job).
+      - name: Harden the runner (egress audit)
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
+        with:
+          egress-policy: audit
+
+      # Download the SARIF that Job 1 uploaded. The "name" must match the upload step.
+      - name: Download SARIF artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: cppcheck-sarif
+          path: .
+
+      # Upload SARIF into GitHub’s Code Scanning (Security tab).
+      # The 'category' helps distinguish different tools in the UI.
+      - name: Upload Cppcheck scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@3c3833e0f8c1c83d449a7478aa59c036a9165498 # v3.29.11
+        with:
+          sarif_file: cppcheck-results.sarif
+          category: cppcheck
