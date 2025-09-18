@@ -1,24 +1,24 @@
 # Cppcheck (native SARIF; built from pinned upstream) — PRs, pushes, manual, weekly
 # =============================================================================
-# PURPOSE (read this first)
+# Purpose
 # -----------------------------------------------------------------------------
 # Cppcheck is a static analysis tool for C/C++ that finds bugs and risky patterns.
 # This workflow:
-#   • Builds a pinned Cppcheck release from source
-#   • Runs Cppcheck on your repository and writes a SARIF report (with CWE where available)
-#   • Uploads the SARIF to GitHub’s Code Scanning (Security tab)
+#   - Builds a pinned Cppcheck release from source
+#   - Runs Cppcheck on your repository and writes a SARIF report (with CWE where available)
+#   - Uploads the SARIF to GitHub’s Code Scanning (Security tab)
 #
-# WHY THIS LAYOUT (security + reliability best practices)
+# Layout explanation (security + reliability best practices)
 # -----------------------------------------------------------------------------
-#   • Default-deny permissions at the workflow level (read-only by default)
-#   • Only the uploader job gets permission to write security events
-#   • Every third-party action is pinned to a specific commit SHA (no “latest”)
-#   • Concurrency cancels older superseded runs (fewer pile-ups on busy PRs)
-#   • Timeouts cap spend and prevent hours-long hangs
-#   • Egress hardening audits outbound network calls (later: block + allowlist)
-#   • Checkout without persisted credentials (we never push here)
+#   - Default-deny permissions at the workflow level (read-only by default)
+#   - Only the uploader job gets permission to write security events
+#   - Every third-party action is pinned to a specific commit SHA (no “latest”)
+#   - Concurrency cancels older superseded runs (fewer pile-ups on busy PRs)
+#   - Timeouts cap spend and prevent hours-long hangs
+#   - Egress hardening audits outbound network calls (later: block + allowlist)
+#   - Checkout without persisted credentials (we never push here)
 #
-# HOW TO READ THIS FILE
+# Notes
 # -----------------------------------------------------------------------------
 # You’ll see notes sprinkled throughout. They define each block,
 # explain why it exists, and suggest safe tweaks.
@@ -28,14 +28,14 @@ name: Cppcheck (native SARIF)
 on:
   # Run on PRs so reviewers see issues before merge.
   pull_request:
-    branches: [ "main" ]                       #  note: adjust to your default branch
+    branches: [ "**"] # [ "main" ]                       #  note: adjust to your default branch
     paths:
       - "**/*"                                 #  note: narrow for speed (e.g., "src/**", "lib/**")
       - ".github/workflows/cppcheck.yml"       # Re-run when this workflow changes
 
   # Also run on pushes to main (covers direct commits / fast-forwards).
   push:
-    branches: [ "main" ]
+    branches: [ "**"] # [ "main" ]
     paths:
       - "**/*"
       - ".github/workflows/cppcheck.yml"
@@ -45,7 +45,7 @@ on:
 
   # Optional weekly run to catch drift. Adjust cadence to taste.
   schedule:
-    - cron: "42 23 * * 2"                      # Tuesdays 23:42 UTC
+    - cron: "42 23 * * 2"                      # Tuesdays 23:42 
 
 # Cancel older in-flight runs for the same PR/ref (prevents CI pile-ups).
 concurrency:
@@ -60,7 +60,7 @@ jobs:
   # ────────────────────────────────── Job 1: Build & Scan (read-only) ──────────────────────────────────
   cppcheck-scan:
     name: Build pinned Cppcheck → scan → SARIF
-    runs-on: ubuntu-24.04                      #  note: fixed runner → repeatable builds
+    runs-on: ubuntu-24.04                      #  note: fixed runner -> repeatable builds
     timeout-minutes: 30                        #  note: cap total time (build + scan)
     permissions:
       contents: read                           #  note: only needs to read code in this job
@@ -106,7 +106,6 @@ jobs:
             libpcre3-dev python3
 
       # Fetch Cppcheck source pinned to the exact commit for 2.18.3 (native SARIF is 2.16+).
-      # CHANGE: build the tool OUTSIDE this repository to avoid scanning its sources.
       - name: Fetch Cppcheck (pinned commit, shallow)
         run: |
           set -euxo pipefail
@@ -121,7 +120,6 @@ jobs:
           git rev-parse HEAD
 
       # Build a release binary. MATCHCOMPILER improves performance; HAVE_RULES enables rules.
-      # CHANGE: build in $RUNNER_TEMP (not inside the repo).
       - name: Build Cppcheck
         working-directory: ${{ runner.temp }}/cppcheck-src
         run: |
@@ -132,11 +130,9 @@ jobs:
 
       # Run Cppcheck with native SARIF output.
       # Notes:
-      #   • --output-format=sarif is supported since 2.16.0
-      #   • Tune --enable/--inconclusive/--std/--platform/--library/--project as needed
-      #   • Add suppressions or path filters to cut noise (see commented examples)
-      # CHANGE: run the analyzer IN THIS REPOSITORY and pass an explicit file list.
-      #         If no C/C++ files are found, emit an EMPTY SARIF so upload always succeeds.
+      #   - --output-format=sarif is supported since 2.16.0
+      #   - Tune --enable/--inconclusive/--std/--platform/--library/--project as needed
+      #   - Add suppressions or path filters to cut noise (see commented examples)
       - name: Run Cppcheck (native SARIF)
         working-directory: ${{ github.workspace }}
         shell: bash
@@ -197,7 +193,7 @@ jobs:
           fi
 
           # Run analysis on the discovered files (+ optional project database, if detected).
-          # NOTE: We do not pick a C/C++ standard here and we do not assume specific directories.
+          # We do not pick a C/C++ standard here and we do not assume specific directories.
 
           # Optional cap for ifdef-config exploration.
           # Default: "--max-configs=256" for more coverage.
@@ -209,7 +205,7 @@ jobs:
             EXTRA_MAX_CONFIGS="${CPPCHECK_MAX_CONFIGS}"
           fi
 
-          # IMPORTANT: --project CANNOT be combined with explicit files/--file-list.
+          # --project cannot be combined with explicit files/--file-list.
           # So: if PROJECT_ARG is set -> run project mode only; else -> run with file list.
           if [ -n "${PROJECT_ARG}" ]; then
             cppcheck \
