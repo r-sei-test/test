@@ -91,7 +91,7 @@ jobs:
 
       # Install Sonar's Build Wrapper (wraps compiler and emits compile_commands.json)
       - name: Install Build Wrapper
-        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@1a6d90ebcb0e6a6b1d87e37ba693fe453195ae25 # v5.3.1
+        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
         # For SonarCloud, no SONAR_HOST_URL env is required; action defaults to sonarcloud.io
 
       # Compile under the Build Wrapper. This produces BW_OUT/compile_commands.json that the C analyzer needs.
@@ -115,7 +115,7 @@ jobs:
       # Run the scanner. It reads sonar-project.properties for org/project.
       # We pass the path to compile_commands.json so the CFamily analyzer can do its job.
       - name: SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@1a6d90ebcb0e6a6b1d87e37ba693fe453195ae25 # v5.3.1
+        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  # SonarCloud user token; no GitHub write scope needed
         with:
