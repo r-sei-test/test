@@ -1,6 +1,7 @@
 # Dependency Review (PRs and Pushes) — hardened
 # =============================================================================
-# What this workflow does:
+# What this workflow does (must enable dependency graph and automatic
+# dependency submission):
 #   - On PRs that change dependency manifests: runs GitHub’s Dependency Review,
 #     annotates the PR, and (optionally) provide a summary.
 #   - On pushes to main (or chosen branches): compares the new commit to
@@ -92,10 +93,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Least privilege for PRs:
-    # - contents: write -> needed for snapshot submission in this job
+    # - contents: read
     # - pull-requests: write -> to post a summary comment (optional)
     permissions:
-      contents: write 
+      contents: read 
       pull-requests: write
 
     steps:
@@ -144,7 +145,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write   # needed for snapshot submission on push
+      contents: read 
 
     steps:
       - name: Harden runner 
