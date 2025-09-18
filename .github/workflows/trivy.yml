@@ -119,7 +119,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          scanners: config
+          scanners: misconfig
           vuln-type: os,library
           format: sarif
           output: reports/trivy-config.sarif

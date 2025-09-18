@@ -204,7 +204,7 @@ jobs:
           head-ref: ${{ steps.base.outputs.head }}
           comment-summary-in-pr: never      # not a PR; no comment
           # Enforcement knobs (uncomment to gate merges/commits in the future):
-          fail-on-severity: low            # block on any known vuln
+          # fail-on-severity: low            # block on any known vuln
           # fail-on-cvss: 5                  # or gate by CVSS score
           # deny-licenses: GPL-1.0-or-later, LGPL-2.0-or-later
           # allow-licenses: MIT, Apache-2.0, BSD-3-Clause
