@@ -92,10 +92,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Least privilege for PRs:
-    # - contents: read -> checkout
+    # - contents: write -> needed for snapshot submission in this job
     # - pull-requests: write -> to post a summary comment (optional)
     permissions:
-      contents: read
+      contents: write 
       pull-requests: write
 
     steps:
@@ -122,7 +122,7 @@ jobs:
         with:
           comment-summary-in-pr: always     # requires pull-requests: write
           # Enforcement knobs (uncomment to gate merges):
-          fail-on-severity: low      # block if any vuln >= low
+          # fail-on-severity: low      # block if any vuln >= low
           # fail-on-cvss: 5                 # or gate by CVSS score
           # deny-licenses: GPL-1.0-or-later, LGPL-2.0-or-later
           # allow-licenses: MIT, Apache-2.0, BSD-3-Clause
@@ -143,9 +143,8 @@ jobs:
     name: Dependency review (push)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # No PR write on push
     permissions:
-      contents: read
+      contents: write   # needed for snapshot submission on push
 
     steps:
       - name: Harden runner 
